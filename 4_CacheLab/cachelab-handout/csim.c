@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <getopt.h>
 
+#define MAXLINE 255
+
 struct {
     int verbose;
     int s;
@@ -12,11 +14,17 @@ struct {
     FILE *fp;
 } option; /* inline argument options */
 
+typedef struct {
+    int size;
+    unsigned tag;
+    unsigned index;
+} c_ele_;
+
 struct cache_line {
     int v : 1;
-    int tag;
     int size;
-    int block;
+    unsigned tag;
+    unsigned index;
     struct cache_line *next;
 };
 
@@ -37,12 +45,38 @@ void useage(char *name);
 
 int main(int argc, char *argv[])
 {
+    char line[MAXLINE];
     option.fp = stdin;
     parse_args(argc, argv);
     if ((S = malloc(1 << option.s)) == NULL) /* S[2^s] */
         exit(3);
+    while (get_line(line, MAXLINE, option.fp) > 0)
+        execute_line(line);
     free(S);
     exit(0);
+}
+
+int execute_line(char *line) {
+    char id;
+    unsigned adress;
+    int size;
+    c_ele_ ad;
+    if (*line++ != ' ')
+        return -1;
+    sscanf(line, option.fp, "%c %x, %d", &id, &adress, &size);
+    parse_adress_bit(adress, &ad);
+}
+
+int get_line(char *line, int lim, FILE *fp)
+{
+    int c;
+    char *init = line;
+    while ((c = fgetc(fp)) != '\n' && c != EOF && lim-- > 0)
+        *line++ = c;
+    if (c == EOF)
+        return c;
+    *line = '\0';
+    return line - init;
 }
 
 int add_tail(struct cache_set *q) {
@@ -51,6 +85,7 @@ int add_tail(struct cache_set *q) {
     } else if (q->head == NULL) {
         if ((q->head = malloc(sizeof(struct cache_line))) == NULL)
             return -1;
+        q->head->next = NULL;
         q->tail = q->head;
     } else {
         struct cache_line *newt;
@@ -74,13 +109,11 @@ int rmv_head(struct cache_set *q) {
     return 0;
 }
 
-int parse_input() {
-    char id;
-    unsigned adress;
-    int size;
-    while (fscanf(option.fp, " %c %x, %d", &id, &adress, &size) > 0) {
 
-    }
+void parse_adress_bit(unsigned adress, c_ele_ *ad)
+{
+    ad->index = adress & -1U >> (32 - option.b);
+    ad->tag = adress >> (option.b + option.s);
 }
 
 void parse_args(int argc, char *argv[])
