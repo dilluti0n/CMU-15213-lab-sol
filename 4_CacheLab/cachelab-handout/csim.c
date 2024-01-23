@@ -4,31 +4,86 @@
 #include <unistd.h>
 #include <getopt.h>
 
-struct option {
+struct {
     int verbose;
     int s;
     int E;
     int b;
-    FILE *file;
+    FILE *fp;
+} option; /* inline argument options */
+
+struct cache_line {
+    int v : 1;
+    int tag;
+    int size;
+    int block;
+    struct cache_line *next;
 };
 
-void parse_args(int argc, char *argv[], struct option *op);
+struct cache_set {
+    int cnt;
+    struct cache_line *head;
+    struct cache_line *tail;
+} *S;
+
+enum cache_search_res {
+    miss = 0,
+    hit,
+    eviction,
+};
+
+void parse_args(int argc, char *argv[]);
 void useage(char *name);
 
 int main(int argc, char *argv[])
 {
-    struct option op = {
-        0,
-        0,
-        0,
-        0,
-        stdin
-    };
-    parse_args(argc, argv, &op);
+    option.fp = stdin;
+    parse_args(argc, argv);
+    if ((S = malloc(1 << option.s)) == NULL) /* S[2^s] */
+        exit(3);
+    free(S);
     exit(0);
 }
 
-void parse_args(int argc, char *argv[], struct option *op)
+int add_tail(struct cache_set *q) {
+    if (q == NULL) {
+        return -1;
+    } else if (q->head == NULL) {
+        if ((q->head = malloc(sizeof(struct cache_line))) == NULL)
+            return -1;
+        q->tail = q->head;
+    } else {
+        struct cache_line *newt;
+        if ((newt = malloc(sizeof(struct cache_line)) == NULL))
+            return -1;
+        newt->next = NULL;
+        q->tail->next = newt;
+        q->tail = newt;
+    }
+    return 0;
+}
+
+int rmv_head(struct cache_set *q) {
+    if (q == NULL || q->head == NULL) {
+        return -1;
+    } else {
+        struct cache_line *newh = q->head->next;
+        free(q->head);
+        q->head = newh;
+    }
+    return 0;
+}
+
+int parse_input() {
+    char id;
+    unsigned adress;
+    int size;
+    while (fscanf(option.fp, " %c %x, %d", &id, &adress, &size) > 0) {
+
+    }
+}
+
+void parse_args(int argc, char *argv[])
 {
     int ch;
     while ((ch = getopt(argc, argv, "hvs:E:b:t:")) != -1)
@@ -37,19 +92,22 @@ void parse_args(int argc, char *argv[], struct option *op)
             useage(argv[0]);
             break;
         case 'v':
-            op->verbose = 1;
+            option.verbose = 1;
             break;
         case 's':
-            op->s = atoi(optarg);
+            option.s = atoi(optarg);
             break;
         case 'E':
-            op->E = atoi(optarg);
+            option.E = atoi(optarg);
             break;
         case 'b':
-            op->b = atoi(optarg);
+            option.b = atoi(optarg);
             break;
         case 't':
-            op->file = fopen(optarg, "r");
+            if ((option.fp = fopen(optarg, "r")) == NULL) {
+                fprintf(stderr, "err: invalid path %s\n", optarg);
+                exit(2);
+            }
             break;
         case '?':
         default:
@@ -57,7 +115,7 @@ void parse_args(int argc, char *argv[], struct option *op)
             useage(argv[0]);
             break;
         }
-    if (op->s == 0 || op->E == 0 || op->b == 0)
+    if (option.s == 0 || option.E == 0 || option.b == 0)
         usage(argv[0]);
 }
 
