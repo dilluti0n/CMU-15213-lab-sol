@@ -4,25 +4,31 @@
 #include <unistd.h>
 #include <getopt.h>
 
-struct {
+struct option {
     int verbose;
     int s;
     int E;
     int b;
-} option;
+    FILE *file;
+};
 
-FILE *tracefile;
-
-int parse_args(int argc, char *argv[]);
+void parse_args(int argc, char *argv[], struct option *op);
 void useage(char *name);
 
 int main(int argc, char *argv[])
 {
-    printSummary(0, 0, 0);
-    return 0;
+    struct option op = {
+        0,
+        0,
+        0,
+        0,
+        stdin
+    };
+    parse_args(argc, argv, &op);
+    exit(0);
 }
 
-int parse_args(int argc, char *argv[])
+void parse_args(int argc, char *argv[], struct option *op)
 {
     int ch;
     while ((ch = getopt(argc, argv, "hvs:E:b:t:")) != -1)
@@ -31,26 +37,28 @@ int parse_args(int argc, char *argv[])
             useage(argv[0]);
             break;
         case 'v':
-            option.verbose = 1;
+            op->verbose = 1;
             break;
         case 's':
-            option.s = atoi(optarg);
+            op->s = atoi(optarg);
             break;
         case 'E':
-            option.E = atoi(optarg);
+            op->E = atoi(optarg);
             break;
         case 'b':
-            option.b = atoi(optarg);
+            op->b = atoi(optarg);
             break;
         case 't':
-            tracefile = fopen(optarg, "r");
+            op->file = fopen(optarg, "r");
             break;
         case '?':
         default:
+            fprintf(stderr, "err: invalid argument %s\n", optopt);
             useage(argv[0]);
             break;
         }
-    return ch;
+    if (op->s == 0 || op->E == 0 || op->b == 0)
+        usage(argv[0]);
 }
 
 void useage(char *name)
