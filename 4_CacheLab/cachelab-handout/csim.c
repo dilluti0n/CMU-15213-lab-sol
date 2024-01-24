@@ -62,7 +62,7 @@ int move_node_to_tail(struct cache_set *q, struct cache_line *prev);
 void free_cache(struct cache_set cache[], int size);
 void free_quene(struct cache_set *q);
 void parse_args(int argc, char *argv[]);
-void useage(char *name);
+void usage(char *name);
 
 int main(int argc, char *argv[])
 {
@@ -249,7 +249,7 @@ void parse_args(int argc, char *argv[])
     while ((ch = getopt(argc, argv, "hvs:E:b:t:")) != -1)
         switch(ch) {
         case 'h':
-            useage(argv[0]);
+            usage(argv[0]);
             break;
         case 'v':
             _op.verbose = 1;
@@ -272,15 +272,15 @@ void parse_args(int argc, char *argv[])
         case '?':
         default:
             fprintf(stderr, "err: invalid argument %c\n", optopt);
-            useage(argv[0]);
+            usage(argv[0]);
             break;
         }
     if (_op.s == 0 || _op.E == 0 || _op.b == 0)
-        useage(argv[0]);
+        usage(argv[0]);
 }
 
-void useage(char *name)
+void usage(char *name)
 {
-    printf("Useage: %s [-hv] -s <s> -E <E> -b <b> -t <tracefile>\n", name);
+    printf("usage: %s [-hv] -s <s> -E <E> -b <b> -t <tracefile>\n", name);
     exit(1);
 }
