@@ -103,7 +103,7 @@ int execute_line(char *line, struct cache_set cache[]) {
     parse_adress_bit(adress, &ad);
     if (_op.verbose != 0) {
         printf("%s", line);
-        printf(" set%d tag%x : ", ad.set_i, ad.tag);
+        printf(" set%d tag(%#x) :", ad.set_i, ad.tag);
     }
     search_cache(&cache[ad.set_i], ad.tag);
     if (ad.id == 'M')
