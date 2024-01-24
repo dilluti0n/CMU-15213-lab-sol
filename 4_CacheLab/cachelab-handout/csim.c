@@ -54,6 +54,7 @@ int execute_line(char *line);
 void parse_adress_bit(unsigned adress, c_ele_ *ad);
 enum res search_cache(struct cache_set *set, c_ele_ *ad);
 void load_result(enum res result);
+void inc_res(enum res result);
 struct cache_line *add_tail(struct cache_set *q);
 void rmv_head(struct cache_set *q);
 void parse_args(int argc, char *argv[]);
@@ -68,6 +69,8 @@ int main(int argc, char *argv[])
         exit(3);
     while (get_line(line, MAXLINE, _op.fp) > 0)
         execute_line(line);
+    if (_op.fp != stdin)
+        fclose(_op.fp);
     printSummary(_count.hit, _count.miss, _count.eviction);
     free(S);
     exit(0);
@@ -94,10 +97,14 @@ int execute_line(char *line) {
         return -1;
     sscanf(line, "%c %x, %d", &ad.id, &adress, &ad.size);
     parse_adress_bit(adress, &ad);
+    if (_op.verbose != 0)
+        printf("%s", line);
     result = search_cache(S + ad.set_i, &ad);
     load_result(result);
     if (result != hit && ad.id != 'L')
         load_result(search_cache(S + ad.set_i, &ad));
+    if (_op.verbose != 0)
+        printf("\n");
     return 0;
 }
 
@@ -145,14 +152,37 @@ void load_result(enum res result)
 {
     switch (result) {
     case miss:
-        _count.miss++;
+        inc_res(miss);
         break;
     case eviction:
+        inc_res(miss);
+        inc_res(eviction);
+        break;
+    case hit:
+        inc_res(hit);
+        break;
+    case err:
+        break;
+    }
+}
+
+void inc_res(enum res result)
+{
+    switch (result) {
+    case miss:
         _count.miss++;
-        _count.eviction++;
+        if (_op.verbose != 0)
+            printf(" miss");
         break;
     case hit:
         _count.hit++;
+        if (_op.verbose != 0)
+            printf(" hit");
+        break;
+    case eviction:
+        _count.eviction++;
+        if (_op.verbose != 0)
+            printf(" eviction");
         break;
     case err:
         break;
