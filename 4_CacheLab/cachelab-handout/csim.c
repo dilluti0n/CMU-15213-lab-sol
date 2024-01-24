@@ -52,7 +52,7 @@ struct cache_set {
 int get_line(char *line, int lim, FILE *fp);
 int execute_line(char *line);
 void parse_adress_bit(unsigned adress, c_ele_ *ad);
-enum res search_cache(struct cache_set *set, c_ele_ *ad);
+void search_cache(struct cache_set *set, c_ele_ *ad);
 void load_result(enum res result);
 void inc_res(enum res result);
 struct cache_line *add_tail(struct cache_set *q);
@@ -92,17 +92,17 @@ int get_line(char *line, int lim, FILE *fp)
 int execute_line(char *line) {
     unsigned adress;
     c_ele_ ad;
-    enum res result;
     if (*line++ != ' ')
         return -1;
     sscanf(line, "%c %x, %d", &ad.id, &adress, &ad.size);
     parse_adress_bit(adress, &ad);
-    if (_op.verbose != 0)
+    if (_op.verbose != 0) {
         printf("%s", line);
-    result = search_cache(S + ad.set_i, &ad);
-    load_result(result);
-    if (result != hit && ad.id != 'L')
-        load_result(search_cache(S + ad.set_i, &ad));
+        printf(" set%d tag%x", ad.set_i, ad.tag);
+    }
+    search_cache(&S[ad.set_i], &ad);
+    if (ad.id == 'M')
+        search_cache(&S[ad.set_i], &ad);
     if (_op.verbose != 0)
         printf("\n");
     return 0;
@@ -115,15 +115,15 @@ void parse_adress_bit(unsigned adress, c_ele_ *ad)
     ad->tag = adress >> (_op.s + _op.b); /* except b and s bits */
 }
 
-enum res search_cache(struct cache_set *set, c_ele_ *ad)
+void search_cache(struct cache_set *set, c_ele_ *ad)
 {
     struct cache_line *p;
     if (set == NULL)
-        return err;
+        return;
     for (p = set->head; p != NULL && p->tag != ad->tag; p = p->next)
         ;
     if (p == NULL) {
-        if ((p = add_tail(set)) < 0) {
+        if ((p = add_tail(set)) == NULL) {
             fprintf(stderr, "err: allocation failed\n");
             exit(-1);
         }
@@ -131,41 +131,23 @@ enum res search_cache(struct cache_set *set, c_ele_ *ad)
         p->size = ad->size;
         p->tag = ad->tag;
         p->block_i = ad->block_i;
-        if (set->cnt < _op.E) {
-            set->cnt++;
-            return miss; /* compulsory miss */
-        } else {
+        inc_res(miss); /* miss */
+        if (_op.E < set->cnt) {
             rmv_head(set);
-            return eviction;
+            inc_res(eviction); /* eviction */
         }
     } else if (p->v == 0) {
         p->v = 1;
         p->size = ad->size;
         p->tag = ad->tag;
         p->block_i = ad->block_i;
-        return miss;
-    }
-    return hit;
-}
-
-void load_result(enum res result)
-{
-    switch (result) {
-    case miss:
-        inc_res(miss);
-        break;
-    case eviction:
-        inc_res(miss);
-        inc_res(eviction);
-        break;
-    case hit:
-        inc_res(hit);
-        break;
-    case err:
-        break;
+        inc_res(miss); /* miss */
+    } else {
+        inc_res(hit); /* hit */
     }
 }
 
+/* for verbose mode */
 void inc_res(enum res result)
 {
     switch (result) {
@@ -202,6 +184,7 @@ struct cache_line *add_tail(struct cache_set *q)
         q->tail->next = newt;
         q->tail = newt;
     }
+    q->cnt++;
     newt->v = 0;
     newt->size = 0;
     newt->tag = 0;
@@ -216,6 +199,7 @@ void rmv_head(struct cache_set *q)
         struct cache_line *newh = q->head->next;
         free(q->head);
         q->head = newh;
+        q->cnt--;
     }
 }
 
