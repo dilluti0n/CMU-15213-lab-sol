@@ -4,6 +4,7 @@
  */
 #include "cachelab.h"
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <getopt.h>
@@ -47,10 +48,10 @@ struct cache_set {
     int cnt;
     struct cache_line *head;
     struct cache_line *tail;
-} *S; /* cache */
+};
 
 int get_line(char *line, int lim, FILE *fp);
-int execute_line(char *line);
+int execute_line(char *line, struct cache_set *cache);
 void parse_adress_bit(unsigned adress, c_ele_ *ad);
 void search_cache(struct cache_set *set, int tag);
 void load_result(enum res result);
@@ -58,22 +59,25 @@ void inc_res(enum res result);
 struct cache_line *add_tail(struct cache_set *q);
 void rmv_head(struct cache_set *q);
 int move_node_to_tail(struct cache_set *q, struct cache_line *prev);
+void free_cache(struct cache_set cache[], int size);
+void free_quene(struct cache_set *q);
 void parse_args(int argc, char *argv[]);
 void useage(char *name);
 
 int main(int argc, char *argv[])
 {
-    char line[MAXLINE];
     _op.fp = stdin;
     parse_args(argc, argv);
-    if (!(S = calloc(1 << _op.s, sizeof(struct cache_set)))) /* S[2^s] */
-        exit(3);
+    const int c_size = 1 << _op.s; /* 2^s */
+    char line[MAXLINE];
+    struct cache_set cache[c_size]; /* cache[2^s]*/
+    memset(cache, 0, sizeof(cache)); /* initalize cache */
     while (get_line(line, MAXLINE, _op.fp) > 0)
-        execute_line(line);
+        execute_line(line, cache);
     if (_op.fp != stdin)
         fclose(_op.fp);
     printSummary(_count.hit, _count.miss, _count.eviction);
-    free(S);
+    free_cache(cache, c_size);
     exit(0);
 }
 
@@ -90,7 +94,7 @@ int get_line(char *line, int lim, FILE *fp)
 }
 
 
-int execute_line(char *line) {
+int execute_line(char *line, struct cache_set cache[]) {
     unsigned adress;
     c_ele_ ad;
     if (*line++ != ' ')
@@ -101,9 +105,9 @@ int execute_line(char *line) {
         printf("%s", line);
         printf(" set%d tag%x : ", ad.set_i, ad.tag);
     }
-    search_cache(&S[ad.set_i], ad.tag);
+    search_cache(&cache[ad.set_i], ad.tag);
     if (ad.id == 'M')
-        search_cache(&S[ad.set_i], ad.tag);
+        search_cache(&cache[ad.set_i], ad.tag);
     if (_op.verbose != 0)
         printf("\n");
     return 0;
@@ -219,6 +223,24 @@ int move_node_to_tail(struct cache_set *q, struct cache_line *prev)
     q->tail = newt;
     newt->next = NULL; /* set newt as tail. */
     return 0;
+}
+
+void free_cache(struct cache_set cache[], int size)
+{
+    int i;
+    for (i = 0; i < size; i++)
+        free_quene(&cache[i]);
+}
+
+void free_quene(struct cache_set *q)
+{
+    if (q != NULL && q->head != NULL) {
+        struct cache_line *p, *next;
+        for (p = q->head; p != NULL; p = next) {
+            next = p->next;
+            free(p);
+        }
+    }
 }
 
 void parse_args(int argc, char *argv[])
