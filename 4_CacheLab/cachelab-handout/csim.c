@@ -29,17 +29,13 @@ struct {
 
 typedef struct {
     char id;
-    int size;
     unsigned tag;
     unsigned set_i;
-    unsigned block_i;
 } c_ele_;
 
 struct cache_line {
     int v;
-    int size;
     unsigned tag;
-    unsigned block_i;
     struct cache_line *next;
 };
 
@@ -47,12 +43,12 @@ struct cache_set {
     int cnt;
     struct cache_line *head;
     struct cache_line *tail;
-} *S;
+} *S; /* cache */
 
 int get_line(char *line, int lim, FILE *fp);
 int execute_line(char *line);
 void parse_adress_bit(unsigned adress, c_ele_ *ad);
-void search_cache(struct cache_set *set, c_ele_ *ad);
+void search_cache(struct cache_set *set, int tag);
 void load_result(enum res result);
 void inc_res(enum res result);
 struct cache_line *add_tail(struct cache_set *q);
@@ -95,15 +91,15 @@ int execute_line(char *line) {
     c_ele_ ad;
     if (*line++ != ' ')
         return -1;
-    sscanf(line, "%c %x, %d", &ad.id, &adress, &ad.size);
+    sscanf(line, "%c %x,", &ad.id, &adress);
     parse_adress_bit(adress, &ad);
     if (_op.verbose != 0) {
         printf("%s", line);
-        printf(" set%d tag%x", ad.set_i, ad.tag);
+        printf(" set%d tag%x : ", ad.set_i, ad.tag);
     }
-    search_cache(&S[ad.set_i], &ad);
+    search_cache(&S[ad.set_i], ad.tag);
     if (ad.id == 'M')
-        search_cache(&S[ad.set_i], &ad);
+        search_cache(&S[ad.set_i], ad.tag);
     if (_op.verbose != 0)
         printf("\n");
     return 0;
@@ -111,17 +107,16 @@ int execute_line(char *line) {
 
 void parse_adress_bit(unsigned adress, c_ele_ *ad)
 {
-    ad->block_i = adress & ~(-1 << _op.b); /* lower b bits */
     ad->set_i = adress >> _op.b & ~(-1 << _op.s); /* lower s+b to b bits */
     ad->tag = adress >> (_op.s + _op.b); /* except b and s bits */
 }
 
-void search_cache(struct cache_set *set, c_ele_ *ad)
+void search_cache(struct cache_set *set, int tag)
 {
     struct cache_line *p, *prev = NULL;
     if (set == NULL)
         return;
-    for (p = set->head; p != NULL && p->tag != ad->tag; prev = p, p = p->next)
+    for (p = set->head; p != NULL && p->tag != tag; prev = p, p = p->next)
         ;
     if (p == NULL) {
         if ((p = add_tail(set)) == NULL) {
@@ -129,9 +124,7 @@ void search_cache(struct cache_set *set, c_ele_ *ad)
             exit(-1);
         }
         p->v = 1;
-        p->size = ad->size;
-        p->tag = ad->tag;
-        p->block_i = ad->block_i;
+        p->tag = tag;
         inc_res(miss); /* miss */
         if (_op.E < set->cnt) {
             rmv_head(set);
@@ -139,9 +132,7 @@ void search_cache(struct cache_set *set, c_ele_ *ad)
         }
     } else if (p->v == 0) {
         p->v = 1;
-        p->size = ad->size;
-        p->tag = ad->tag;
-        p->block_i = ad->block_i;
+        p->tag = tag;
         inc_res(miss); /* miss */
     } else {
         move_node_to_tail(set, prev);
@@ -188,9 +179,7 @@ struct cache_line *add_tail(struct cache_set *q)
     }
     q->cnt++;
     newt->v = 0;
-    newt->size = 0;
     newt->tag = 0;
-    newt->block_i = 0;
     newt->next = NULL;
     return newt;
 }
