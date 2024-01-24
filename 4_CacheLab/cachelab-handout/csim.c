@@ -57,6 +57,7 @@ void load_result(enum res result);
 void inc_res(enum res result);
 struct cache_line *add_tail(struct cache_set *q);
 void rmv_head(struct cache_set *q);
+int move_node_to_tail(struct cache_set *q, struct cache_line *prev);
 void parse_args(int argc, char *argv[]);
 void useage(char *name);
 
@@ -117,10 +118,10 @@ void parse_adress_bit(unsigned adress, c_ele_ *ad)
 
 void search_cache(struct cache_set *set, c_ele_ *ad)
 {
-    struct cache_line *p;
+    struct cache_line *p, *prev = NULL;
     if (set == NULL)
         return;
-    for (p = set->head; p != NULL && p->tag != ad->tag; p = p->next)
+    for (p = set->head; p != NULL && p->tag != ad->tag; prev = p, p = p->next)
         ;
     if (p == NULL) {
         if ((p = add_tail(set)) == NULL) {
@@ -143,6 +144,7 @@ void search_cache(struct cache_set *set, c_ele_ *ad)
         p->block_i = ad->block_i;
         inc_res(miss); /* miss */
     } else {
+        move_node_to_tail(set, prev);
         inc_res(hit); /* hit */
     }
 }
@@ -201,6 +203,29 @@ void rmv_head(struct cache_set *q)
         q->head = newh;
         q->cnt--;
     }
+}
+
+int move_node_to_tail(struct cache_set *q, struct cache_line *prev)
+{
+    struct cache_line *newt;
+    if (q == NULL || q->head == NULL) /* if quene is NULL or empty */
+        return -1;
+    if (prev != NULL) { /* newt is not head. */
+        newt = prev->next;
+        if (newt == NULL)
+            return -1; /* this is not intended. */
+        if (newt->next == NULL) /* newt is tail */
+            return 0;
+        prev->next = newt->next;
+    } else { /* newt is head */
+        newt = q->head;
+        if (newt->next != NULL) /* else, head should not be changed. */
+            q->head = newt->next;
+    }
+    q->tail->next = newt;
+    q->tail = newt;
+    newt->next = NULL; /* set newt as tail. */
+    return 0;
 }
 
 void parse_args(int argc, char *argv[])
