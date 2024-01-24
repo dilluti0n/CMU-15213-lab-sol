@@ -6,25 +6,40 @@
 
 #define MAXLINE 255
 
+enum res {
+    err = -1,
+    miss = 0,
+    hit,
+    eviction,
+};
+
 struct {
     int verbose;
     int s;
     int E;
     int b;
     FILE *fp;
-} option; /* inline argument options */
+} _op; /* inline argument options */
+
+struct {
+    int hit;
+    int miss;
+    int eviction;
+} _count; /* result */
 
 typedef struct {
+    char id;
     int size;
     unsigned tag;
-    unsigned index;
+    unsigned set_i;
+    unsigned block_i;
 } c_ele_;
 
 struct cache_line {
     int v : 1;
     int size;
     unsigned tag;
-    unsigned index;
+    unsigned block_i;
     struct cache_line *next;
 };
 
@@ -34,37 +49,102 @@ struct cache_set {
     struct cache_line *tail;
 } *S;
 
-enum cache_search_res {
-    miss = 0,
-    hit,
-    eviction,
-};
-
+int execute_line(char *line);
+void parse_adress_bit(unsigned adress, c_ele_ *ad);
+enum res search_cache(struct cache_set *set, c_ele_ *ad);
+void load_result(enum res result);
+int get_line(char *line, int lim, FILE *fp);
+struct cache_line *add_tail(struct cache_set *q);
+void rmv_head(struct cache_set *q);
 void parse_args(int argc, char *argv[]);
 void useage(char *name);
 
 int main(int argc, char *argv[])
 {
     char line[MAXLINE];
-    option.fp = stdin;
+    _op.fp = stdin;
     parse_args(argc, argv);
-    if ((S = malloc(1 << option.s)) == NULL) /* S[2^s] */
+    if (!(S = calloc(1 << _op.s, sizeof(struct cache_set)))) /* S[2^s] */
         exit(3);
-    while (get_line(line, MAXLINE, option.fp) > 0)
+    while (get_line(line, MAXLINE, _op.fp) > 0)
         execute_line(line);
+    printSummary(_count.hit, _count.miss, _count.eviction);
+    printf("hits:%d misses:%d evictions:%d\n", _count.hit, 
+                                        _count.miss, _count.eviction);
     free(S);
     exit(0);
 }
 
 int execute_line(char *line) {
-    char id;
     unsigned adress;
-    int size;
     c_ele_ ad;
+    enum res result;
     if (*line++ != ' ')
         return -1;
-    sscanf(line, option.fp, "%c %x, %d", &id, &adress, &size);
+    sscanf(line, _op.fp, "%c %x, %d", &ad.id, &adress, &ad.size);
     parse_adress_bit(adress, &ad);
+    result = search_cache(S + ad.set_i, &ad);
+    load_result(result);
+    if (result != hit && ad.id != 'L')
+        load_result(search_cache(S + ad.set_i, &ad));
+}
+
+void parse_adress_bit(unsigned adress, c_ele_ *ad)
+{
+    int tmp = _op.s + _op.b;
+    ad->block_i = adress & ~(-1 << _op.b); /* lower b bits */
+    ad->set_i = adress >> _op.b & ~(-1 << tmp); /* lower s+b to b bits */
+    ad->tag = adress >> tmp; /* except b and s bits */
+}
+
+enum res search_cache(struct cache_set *set, c_ele_ *ad)
+{
+    struct cache_line *p;
+    if (set == NULL)
+        return err;
+    for (p = set->head; p != NULL && p->tag != ad->tag; p = p->next)
+        ;
+    if (p == NULL) {
+        if ((p = add_tail(set)) < 0) {
+            fprintf(stderr, "err: allocation failed\n");
+            exit(-1);
+        }
+        p->v = 1;
+        p->size = ad->size;
+        p->tag = ad->tag;
+        p->block_i = ad->block_i;
+        if (set->cnt < _op.E) {
+            set->cnt++;
+            return miss; /* compulsory miss */
+        } else {
+            rmv_head(set);
+            return eviction;
+        }
+    } else if (p->v == 0) {
+        p->v = 1;
+        p->size = ad->size;
+        p->tag = ad->tag;
+        p->block_i = ad->block_i;
+        return miss;
+    }
+    return hit;
+}
+
+void load_result(enum res result)
+{
+    switch (result) {
+    case miss:
+        _count.miss++;
+        break;
+    case eviction:
+        _count.miss++;
+        _count.eviction++;
+        break;
+    case hit:
+        _count.hit++;
+        break;
+    case err:
+    }
 }
 
 int get_line(char *line, int lim, FILE *fp)
@@ -73,47 +153,40 @@ int get_line(char *line, int lim, FILE *fp)
     char *init = line;
     while ((c = fgetc(fp)) != '\n' && c != EOF && lim-- > 0)
         *line++ = c;
+    *line = '\0';
     if (c == EOF)
         return c;
-    *line = '\0';
     return line - init;
 }
 
-int add_tail(struct cache_set *q) {
-    if (q == NULL) {
-        return -1;
-    } else if (q->head == NULL) {
-        if ((q->head = malloc(sizeof(struct cache_line))) == NULL)
-            return -1;
-        q->head->next = NULL;
-        q->tail = q->head;
+struct cache_line *add_tail(struct cache_set *q)
+{
+    struct cache_line *newt;
+    if (q == NULL)
+        return NULL;
+    if ((newt = malloc(sizeof(struct cache_line))) == NULL)
+        return NULL;
+    if (q->head == NULL) {
+        newt = q->tail = q->head;
     } else {
-        struct cache_line *newt;
-        if ((newt = malloc(sizeof(struct cache_line)) == NULL))
-            return -1;
-        newt->next = NULL;
         q->tail->next = newt;
         q->tail = newt;
     }
-    return 0;
+    newt->v = 0;
+    newt->size = 0;
+    newt->tag = 0;
+    newt->block_i = 0;
+    newt->next = NULL;
+    return newt;
 }
 
-int rmv_head(struct cache_set *q) {
-    if (q == NULL || q->head == NULL) {
-        return -1;
-    } else {
+void rmv_head(struct cache_set *q)
+{
+    if (q != NULL && q->head != NULL) {
         struct cache_line *newh = q->head->next;
         free(q->head);
         q->head = newh;
     }
-    return 0;
-}
-
-
-void parse_adress_bit(unsigned adress, c_ele_ *ad)
-{
-    ad->index = adress & -1U >> (32 - option.b);
-    ad->tag = adress >> (option.b + option.s);
 }
 
 void parse_args(int argc, char *argv[])
@@ -125,19 +198,19 @@ void parse_args(int argc, char *argv[])
             useage(argv[0]);
             break;
         case 'v':
-            option.verbose = 1;
+            _op.verbose = 1;
             break;
         case 's':
-            option.s = atoi(optarg);
+            _op.s = atoi(optarg);
             break;
         case 'E':
-            option.E = atoi(optarg);
+            _op.E = atoi(optarg);
             break;
         case 'b':
-            option.b = atoi(optarg);
+            _op.b = atoi(optarg);
             break;
         case 't':
-            if ((option.fp = fopen(optarg, "r")) == NULL) {
+            if ((_op.fp = fopen(optarg, "r")) == NULL) {
                 fprintf(stderr, "err: invalid path %s\n", optarg);
                 exit(2);
             }
@@ -148,12 +221,12 @@ void parse_args(int argc, char *argv[])
             useage(argv[0]);
             break;
         }
-    if (option.s == 0 || option.E == 0 || option.b == 0)
+    if (_op.s == 0 || _op.E == 0 || _op.b == 0)
         usage(argv[0]);
 }
 
 void useage(char *name)
 {
-    fprintf(stderr, "Useage: ./%s [-hv] -s <s> -E <E> -b <b> -t <tracefile>\n", name);
+    printf("Useage: ./%s [-hv] -s <s> -E <E> -b <b> -t <tracefile>\n", name);
     exit(1);
 }
