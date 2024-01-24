@@ -36,7 +36,7 @@ typedef struct {
 } c_ele_;
 
 struct cache_line {
-    int v : 1;
+    int v;
     int size;
     unsigned tag;
     unsigned block_i;
@@ -49,11 +49,11 @@ struct cache_set {
     struct cache_line *tail;
 } *S;
 
+int get_line(char *line, int lim, FILE *fp);
 int execute_line(char *line);
 void parse_adress_bit(unsigned adress, c_ele_ *ad);
 enum res search_cache(struct cache_set *set, c_ele_ *ad);
 void load_result(enum res result);
-int get_line(char *line, int lim, FILE *fp);
 struct cache_line *add_tail(struct cache_set *q);
 void rmv_head(struct cache_set *q);
 void parse_args(int argc, char *argv[]);
@@ -69,11 +69,22 @@ int main(int argc, char *argv[])
     while (get_line(line, MAXLINE, _op.fp) > 0)
         execute_line(line);
     printSummary(_count.hit, _count.miss, _count.eviction);
-    printf("hits:%d misses:%d evictions:%d\n", _count.hit, 
-                                        _count.miss, _count.eviction);
     free(S);
     exit(0);
 }
+
+int get_line(char *line, int lim, FILE *fp)
+{
+    int c;
+    char *init = line;
+    while ((c = fgetc(fp)) != '\n' && c != EOF && lim-- > 0)
+        *line++ = c;
+    *line = '\0';
+    if (c == EOF)
+        return c;
+    return line - init;
+}
+
 
 int execute_line(char *line) {
     unsigned adress;
@@ -81,20 +92,20 @@ int execute_line(char *line) {
     enum res result;
     if (*line++ != ' ')
         return -1;
-    sscanf(line, _op.fp, "%c %x, %d", &ad.id, &adress, &ad.size);
+    sscanf(line, "%c %x, %d", &ad.id, &adress, &ad.size);
     parse_adress_bit(adress, &ad);
     result = search_cache(S + ad.set_i, &ad);
     load_result(result);
     if (result != hit && ad.id != 'L')
         load_result(search_cache(S + ad.set_i, &ad));
+    return 0;
 }
 
 void parse_adress_bit(unsigned adress, c_ele_ *ad)
 {
-    int tmp = _op.s + _op.b;
     ad->block_i = adress & ~(-1 << _op.b); /* lower b bits */
-    ad->set_i = adress >> _op.b & ~(-1 << tmp); /* lower s+b to b bits */
-    ad->tag = adress >> tmp; /* except b and s bits */
+    ad->set_i = adress >> _op.b & ~(-1 << _op.s); /* lower s+b to b bits */
+    ad->tag = adress >> (_op.s + _op.b); /* except b and s bits */
 }
 
 enum res search_cache(struct cache_set *set, c_ele_ *ad)
@@ -144,19 +155,8 @@ void load_result(enum res result)
         _count.hit++;
         break;
     case err:
+        break;
     }
-}
-
-int get_line(char *line, int lim, FILE *fp)
-{
-    int c;
-    char *init = line;
-    while ((c = fgetc(fp)) != '\n' && c != EOF && lim-- > 0)
-        *line++ = c;
-    *line = '\0';
-    if (c == EOF)
-        return c;
-    return line - init;
 }
 
 struct cache_line *add_tail(struct cache_set *q)
@@ -167,7 +167,7 @@ struct cache_line *add_tail(struct cache_set *q)
     if ((newt = malloc(sizeof(struct cache_line))) == NULL)
         return NULL;
     if (q->head == NULL) {
-        newt = q->tail = q->head;
+        q->tail = q->head = newt;
     } else {
         q->tail->next = newt;
         q->tail = newt;
@@ -217,16 +217,16 @@ void parse_args(int argc, char *argv[])
             break;
         case '?':
         default:
-            fprintf(stderr, "err: invalid argument %s\n", optopt);
+            fprintf(stderr, "err: invalid argument %c\n", optopt);
             useage(argv[0]);
             break;
         }
     if (_op.s == 0 || _op.E == 0 || _op.b == 0)
-        usage(argv[0]);
+        useage(argv[0]);
 }
 
 void useage(char *name)
 {
-    printf("Useage: ./%s [-hv] -s <s> -E <E> -b <b> -t <tracefile>\n", name);
+    printf("Useage: %s [-hv] -s <s> -E <E> -b <b> -t <tracefile>\n", name);
     exit(1);
 }
