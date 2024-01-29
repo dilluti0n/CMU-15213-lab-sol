@@ -34,13 +34,13 @@ struct {
 
 typedef struct {
     char id;
-    unsigned tag;
-    unsigned set_i;
+    size_t tag;
+    size_t set_i;
 } c_ele_;
 
 struct cache_line {
     int v;
-    unsigned tag;
+    size_t tag;
     struct cache_line *next;
 };
 
@@ -52,8 +52,8 @@ struct cache_set {
 
 int get_line(char *line, int lim, FILE *fp);
 int execute_line(char *line, struct cache_set *cache);
-void parse_adress_bit(unsigned adress, c_ele_ *ad);
-void search_cache(struct cache_set *set, int tag);
+void parse_adress_bit(size_t adress, c_ele_ *ad);
+void search_cache(struct cache_set *set, size_t tag);
 void load_result(enum res result);
 void inc_res(enum res result);
 struct cache_line *add_tail(struct cache_set *q);
@@ -95,15 +95,15 @@ int get_line(char *line, int lim, FILE *fp)
 
 
 int execute_line(char *line, struct cache_set cache[]) {
-    unsigned adress;
+    size_t adress;
     c_ele_ ad;
     if (*line++ != ' ')
         return -1;
-    sscanf(line, "%c %x,", &ad.id, &adress);
+    sscanf(line, "%c %lx,", &ad.id, &adress);
     parse_adress_bit(adress, &ad);
     if (_op.verbose != 0) {
         printf("%s", line);
-        printf(" set%d tag(%#x) :", ad.set_i, ad.tag);
+        printf(" set%lu tag(%#lx) :", ad.set_i, ad.tag);
     }
     search_cache(&cache[ad.set_i], ad.tag);
     if (ad.id == 'M')
@@ -113,13 +113,13 @@ int execute_line(char *line, struct cache_set cache[]) {
     return 0;
 }
 
-void parse_adress_bit(unsigned adress, c_ele_ *ad)
+void parse_adress_bit(size_t adress, c_ele_ *ad)
 {
     ad->set_i = adress >> _op.b & ~(-1 << _op.s); /* lower s+b to b bits */
     ad->tag = adress >> (_op.s + _op.b); /* except b and s bits */
 }
 
-void search_cache(struct cache_set *set, int tag)
+void search_cache(struct cache_set *set, size_t tag)
 {
     struct cache_line *p, *prev = NULL;
     if (set == NULL)
