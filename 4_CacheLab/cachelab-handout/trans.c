@@ -46,6 +46,50 @@ void trans(int M, int N, int A[N][M], int B[M][N])
 
 }
 
+char trans_block4_desc[] = "simple cache-optimized version with 4 blocks";
+void trans_block4(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j, i1, j1, tmp;
+    const int S = 4;
+    for (i = 0; i < N; i += S)
+        for (j = 0; j < M; j += S)
+            for (i1 = i; i1 < i + S && i1 < N; i1++)
+                for (j1 = j; j1 < j + S && j1 < M; j1++) {
+                    tmp = A[i1][j1];
+                    B[j1][i1] = tmp;
+                }
+
+}
+
+char trans_block_desc[] = "cache-optimized version with BLOCK 4";
+void trans_block(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j, i1, j1;
+    int a, b, c, d;
+    const int S = 4;
+    for (i = 0; i < N; i += S)
+        for (j = 0; j < M; j += S) {
+            i1 = i;
+            if (j + S < M) {
+                a = A[i1][j];
+                b = A[i1][j+1];
+                c = A[i1][j+2];
+                d = A[i1][j+3];
+                B[j][i1] = a;
+                B[j+1][i1] = b;
+                B[j+2][i1] = c;
+                B[j+3][i1] = d;
+                i1++;
+            }
+            for (; i1 < i + S && i1 < N; i1++) {
+                for (j1 = j; j1 < j + S && j1 < M; j1++) {
+                    a = A[i1][j1];
+                    B[j1][i1] = a;
+                }
+            }
+        }
+}
+
 /*
  * registerFunctions - This function registers your transpose
  *     functions with the driver.  At runtime, the driver will
@@ -60,6 +104,9 @@ void registerFunctions()
 
     /* Register any additional transpose functions */
     registerTransFunction(trans, trans_desc); 
+
+    registerTransFunction(trans_block4, trans_block4_desc); 
+    registerTransFunction(trans_block, trans_block_desc); 
 
 }
 
