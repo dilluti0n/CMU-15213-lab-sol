@@ -50,44 +50,42 @@ void block8_simple(int M, int N, int A[N][M], int B[M][N])
 {
     int i, j, i1, j1, tmp;
     for (i = 0; i < N; i += 8)
-        for (j = 0; j < M; j += 4)
+        for (j = 0; j < M; j += 8)
             for (i1 = i; i1 < i + 8 && i1 < N; i1++)
-                for (j1 = j; j1 < j + 4 && j1 < M; j1++) {
+                for (j1 = j; j1 < j + 8 && j1 < M; j1++) {
                     tmp = A[i1][j1];
                     B[j1][i1] = tmp;
                 }
 
 }
 
+/* 32x32, 61x67 passed but 64x64 goes wrong.... */
 void block8(int M, int N, int A[N][M], int B[M][N])
 {
     register int i, j, i1, j1;
-    int row[4];
+    int row[8];
     for (i = 0; i < N; i += 8)
-        for (j = 0; j < M; j += 4) {
+        for (j = 0; j < M; j += 8) {
             for (i1 = i; i1 < i + 8 && i1 < N; i1++) {
-                for (j1 = j; j1 < j + 4 && j1 < M; j1++)
+                for (j1 = j; j1 < j + 8 && j1 < M; j1++)
                     row[j1-j] = A[i1][j1];
-                for (j1 = j; j1 < j + 4 && j1 < M; j1++)
+                for (j1 = j; j1 < j + 8 && j1 < M; j1++)
                     B[j1][i1] = row[j1-j];
             }
         }
 }
 
-void block8_register(int M, int N, int A[N][M], int B[M][N])
+void block8_for64(int M, int N, int A[N][M], int B[M][N])
 {
-    register int i, j, i1, a, b, c, d;
-    for (i = 0; i < N; i += 8)
-        for (j = 0; j < M; j += 4) {
+    register int i, j, i1, j1;
+    int row[8];
+    for (j = 0; j < M; j += 8)
+        for (i = 0; i < N; i += 8) {
             for (i1 = i; i1 < i + 8 && i1 < N; i1++) {
-                a = A[i1][j];
-                b = A[i1][j+1];
-                c = A[i1][j+2];
-                d = A[i1][j+3];
-                B[j][i1] = a;
-                B[j+1][i1] = b;
-                B[j+2][i1] = c;
-                B[j+3][i1] = d;
+                for (j1 = j; j1 < j + 8 && j1 < M; j1++)
+                    row[j1-j] = A[i1][j1];
+                for (j1 = j; j1 < j + 8 && j1 < M; j1++)
+                    B[j1][i1] = row[j1-j];
             }
         }
 }
@@ -106,8 +104,7 @@ void registerFunctions()
 
     registerTransFunction(block8_simple, "simple");  
     registerTransFunction(block8, "block8");
-    /* same with block8-stackframe does not affects */
-    registerTransFunction(block8_register, "block8 registered version");
+    registerTransFunction(block8_for64, "block8 for 64x64 matrix");
 
 }
 
