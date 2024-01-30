@@ -46,31 +46,40 @@ void trans(int M, int N, int A[N][M], int B[M][N])
 
 }
 
-char trans_block4_desc[] = "simple cache-optimized version with 4 blocks";
-void trans_block4(int M, int N, int A[N][M], int B[M][N])
+void block8_simple(int M, int N, int A[N][M], int B[M][N])
 {
     int i, j, i1, j1, tmp;
-    const int S = 4;
-    for (i = 0; i < N; i += S)
-        for (j = 0; j < M; j += S)
-            for (i1 = i; i1 < i + S && i1 < N; i1++)
-                for (j1 = j; j1 < j + S && j1 < M; j1++) {
+    for (i = 0; i < N; i += 8)
+        for (j = 0; j < M; j += 4)
+            for (i1 = i; i1 < i + 8 && i1 < N; i1++)
+                for (j1 = j; j1 < j + 4 && j1 < M; j1++) {
                     tmp = A[i1][j1];
                     B[j1][i1] = tmp;
                 }
 
 }
 
-char trans_block_desc[] = "cache-optimized version with BLOCK 4";
-void trans_block(int M, int N, int A[N][M], int B[M][N])
+void block8(int M, int N, int A[N][M], int B[M][N])
 {
-    int i, j, i1, j1;
-    int a, b, c, d;
-    const int S = 4;
-    for (i = 0; i < N; i += S)
-        for (j = 0; j < M; j += S) {
-            i1 = i;
-            if (j + S < M) {
+    register int i, j, i1, j1;
+    int row[4];
+    for (i = 0; i < N; i += 8)
+        for (j = 0; j < M; j += 4) {
+            for (i1 = i; i1 < i + 8 && i1 < N; i1++) {
+                for (j1 = j; j1 < j + 4 && j1 < M; j1++)
+                    row[j1-j] = A[i1][j1];
+                for (j1 = j; j1 < j + 4 && j1 < M; j1++)
+                    B[j1][i1] = row[j1-j];
+            }
+        }
+}
+
+void block8_register(int M, int N, int A[N][M], int B[M][N])
+{
+    register int i, j, i1, a, b, c, d;
+    for (i = 0; i < N; i += 8)
+        for (j = 0; j < M; j += 4) {
+            for (i1 = i; i1 < i + 8 && i1 < N; i1++) {
                 a = A[i1][j];
                 b = A[i1][j+1];
                 c = A[i1][j+2];
@@ -79,13 +88,6 @@ void trans_block(int M, int N, int A[N][M], int B[M][N])
                 B[j+1][i1] = b;
                 B[j+2][i1] = c;
                 B[j+3][i1] = d;
-                i1++;
-            }
-            for (; i1 < i + S && i1 < N; i1++) {
-                for (j1 = j; j1 < j + S && j1 < M; j1++) {
-                    a = A[i1][j1];
-                    B[j1][i1] = a;
-                }
             }
         }
 }
@@ -100,13 +102,12 @@ void trans_block(int M, int N, int A[N][M], int B[M][N])
 void registerFunctions()
 {
     /* Register your solution function */
-    registerTransFunction(transpose_submit, transpose_submit_desc); 
+    registerTransFunction(transpose_submit, transpose_submit_desc);
 
-    /* Register any additional transpose functions */
-    registerTransFunction(trans, trans_desc); 
-
-    registerTransFunction(trans_block4, trans_block4_desc); 
-    registerTransFunction(trans_block, trans_block_desc); 
+    registerTransFunction(block8_simple, "simple");  
+    registerTransFunction(block8, "block8");
+    /* same with block8-stackframe does not affects */
+    registerTransFunction(block8_register, "block8 registered version");
 
 }
 
