@@ -79,14 +79,57 @@ void block8_for64(int M, int N, int A[N][M], int B[M][N])
 {
     register int i, j, i1, j1;
     int row[8];
-    for (j = 0; j < M; j += 8)
-        for (i = 0; i < N; i += 8) {
+    for (i = 0; i < N; i += 8)
+        for (j = 0; j < M; j += 4)
             for (i1 = i; i1 < i + 8 && i1 < N; i1++) {
-                for (j1 = j; j1 < j + 8 && j1 < M; j1++)
+                for (j1 = j; j1 < j + 4 && j1 < M; j1++)
                     row[j1-j] = A[i1][j1];
-                for (j1 = j; j1 < j + 8 && j1 < M; j1++)
+                for (j1 = j; j1 < j + 4 && j1 < M; j1++)
                     B[j1][i1] = row[j1-j];
             }
+}
+
+void avoid_eviction(int M, int N, int A[N][M], int B[M][N])
+{
+    register int i, j, i1, j1;
+    int diagonal[4];
+    for (i = 0; i < N; i += 4)
+        for (j = 0; j < M; j += 4) {
+            for (i1 = i; i1 < i + 4 && i1 < N; i1++) {
+                for (j1 = j; j1 < j + 4 && j1 < M; j1++) {
+                    if (i1-i == j1-j) {
+                        diagonal[j1-j] = A[i1][j1];
+                    } else {
+                        B[j1][i1] = A[i1][j1];
+                    }
+                }
+            }
+            for (j1 = j; j1 < j + 4 && j1 < M; j1++)
+                B[j1][j1-j+i] = diagonal[j1-j];
+        }
+}
+
+/* 
+ * only for 64x64 matrix 
+ * store next block of B.
+ */
+void opfor64(int M, int N, int A[N][M], int B[M][N])
+{
+    register int i1, j1, i, j, tmp;
+    for (i = 0; i < N; i += 16)
+        for (j = 0; j < M; j += 4) {
+            for (i1 = i; i1 < i + 8; i1++)
+                for (j1 = j; j1 < j + 4; j1++)
+                    B[j1][i1+8] = A[i1][j1];
+            for (; i1 < i + 16; i1++)
+                for (j1 = j; j1 < j + 4; j1++)
+                    B[j1][i1-8] = A[i1][j1];
+            for (j1 = j; j1 < j + 4; j1++)
+                for (i1 = i; i1 < i + 8; i1++) {
+                    tmp = B[j1][i1];
+                    B[j1][i1] = B[j1][i1+8];
+                    B[j1][i1+8] = tmp;
+                }
         }
 }
 
@@ -102,10 +145,11 @@ void registerFunctions()
     /* Register your solution function */
     registerTransFunction(transpose_submit, transpose_submit_desc);
 
-    registerTransFunction(block8_simple, "simple");  
-    registerTransFunction(block8, "block8");
-    registerTransFunction(block8_for64, "block8 for 64x64 matrix");
-
+    //registerTransFunction(block8_simple, "simple");  
+    //registerTransFunction(block8, "block8");
+    //registerTransFunction(block8_for64, "block8 for 64x64 matrix");
+    //registerTransFunction(avoid_eviction, "avoid eviction caused in square matrix");
+    registerTransFunction(opfor64, "FOR 64x64 matrix.");
 }
 
 /* 
