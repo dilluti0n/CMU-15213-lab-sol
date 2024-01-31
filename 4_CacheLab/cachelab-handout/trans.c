@@ -133,6 +133,76 @@ void opfor64(int M, int N, int A[N][M], int B[M][N])
         }
 }
 
+/* 
+ * only for 64x64 matrix 
+ * store next block of B.
+ * This is also evicted.
+ */
+void opfor64_m(int M, int N, int A[N][M], int B[M][N])
+{
+    register int i1, j1, i, j, tmp;
+    /* assume N is 64(or any multiple of 8 greater than 8.) */
+    const int hN = N >> 1; 
+    for (i = 0; i < hN; i += 8)
+        for (j = 0; j < M; j += 4) {
+            for (i1 = i; i1 < i + 8; i1++)
+                for (j1 = j; j1 < j + 4; j1++)
+                    B[j1][i1-i+N-i-8] = A[i1][j1]; /* (i1-i)+(N-i-8) */
+            for (i1 = N - i - 8; i1 < N - i; i1++)
+                for (j1 = j; j1 < j + 4; j1++)
+                    B[j1][i1-N+i+8+i] = A[i1][j1]; /* (i1-(N-i-8))+i */
+            for (j1 = j; j1 < j + 4; j1++)
+                for (i1 = i; i1 < i + 8; i1++) {
+                    tmp = B[j1][i1];
+                    B[j1][i1] = B[j1][i1-i+N-i-8];
+                    B[j1][i1-i+N-i-8] = tmp;
+                }
+        }
+}
+
+/* 
+ * only for 64x64 matrix 
+ * store next block of B. 
+ * not working...(why?)
+ */
+void opfor64_f(int M, int N, int A[N][M], int B[M][N])
+{
+    register int i1, j1, i, j, tmp;
+    for (i = 0; i < N; i += 16)
+        for (j = 0; j < M - 8; j += 4) { /* for j1 = 0 ~ M-9 */
+            for (i1 = i; i1 < i + 8; i1++)
+                for (j1 = j; j1 < j + 4; j1++)
+                    B[j1][i1+8] = A[i1][j1];
+            for (; i1 < i + 16; i1++)
+                for (j1 = j; j1 < j + 4; j1++)
+                    B[j1+8][i1] = A[i1][j1]; /* store under */
+            for (j1 = j; j1 < j + 4; j1++)
+                for (i1 = i; i1 < i + 8; i1++)
+                    B[j1][i1] = B[j1+8][i1+8];
+            for (j1 = j; j1 < j + 4; j1++)
+                for (i1 = i; i1 < i + 8; i1++) {
+                    tmp = B[j1][i1];
+                    B[j1][i1] = B[j1][i1+8];
+                    B[j1][i1+8] = tmp;
+                }
+        }
+    for (i = 0; i < N; i += 16)
+        for (; j < M; j += 4) { /* for j1 = M-8 ~ M-1*/
+            for (i1 = i; i1 < i + 8; i1++)
+                for (j1 = j; j1 < j + 4; j1++)
+                    B[j1][i1+8] = A[i1][j1];
+            for (; i1 < i + 16; i1++)
+                for (j1 = j; j1 < j + 4; j1++)
+                    B[j1][i1-8] = A[i1][j1];
+            for (j1 = j; j1 < j + 4; j1++)
+                for (i1 = i; i1 < i + 8; i1++) {
+                    tmp = B[j1][i1];
+                    B[j1][i1] = B[j1][i1+8];
+                    B[j1][i1+8] = tmp;
+                }
+        }
+}
+
 /*
  * registerFunctions - This function registers your transpose
  *     functions with the driver.  At runtime, the driver will
@@ -149,7 +219,8 @@ void registerFunctions()
     //registerTransFunction(block8, "block8");
     //registerTransFunction(block8_for64, "block8 for 64x64 matrix");
     //registerTransFunction(avoid_eviction, "avoid eviction caused in square matrix");
-    registerTransFunction(opfor64, "FOR 64x64 matrix.");
+    //registerTransFunction(opfor64, "simple");
+    registerTransFunction(opfor64_m, "FOR 64x64 matrix. mirror");
 }
 
 /* 
