@@ -203,6 +203,61 @@ void opfor64_f(int M, int N, int A[N][M], int B[M][N])
         }
 }
 
+void block8x4_ref(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j, i1, j1, tmp;
+    for (i = 0; i < N; i += 8)
+        for (j = 0; j < M; j += 4)
+            for (i1 = i; i1 < i + 8 && i1 < N; i1++)
+                for (j1 = j; j1 < j + 4 && j1 < M; j1++) {
+                    tmp = A[i1][j1];
+                    B[j1][i1] = tmp;
+                }
+
+}
+
+void block8x4_opt(int M, int N, int A[N][M], int B[M][N])
+{
+    register int i, j, i1, j1, tmp;
+    for (i = 0; i < N; i += 8)
+        for (j = 0; j < M; j += 4) {
+            if (j < i + 8 && j >= i) /* if same-row-and-block, j = i or j = i + 4 */
+                continue;
+            for (i1 = i; i1 < i + 8 ; i1++) {
+                for (j1 = j; j1 < j + 4 ; j1++) {
+                    tmp = A[i1][j1];
+                    B[j1][i1] = tmp;
+                }
+            }
+        }
+    for (i = 0; i < N; i += 16) { /* diagonal swap storing */
+        for (i1 = i; i1 < i + 8; i1++) { /* store */
+            for (j1 = i; j1 < i + 4; j1++)
+                B[j1+8][i1+8] = A[i1][j1];
+            for (; j1 < i + 8; j1++)
+                B[j1+8][i1+8] = A[i1][j1];
+        }
+        for (; i1 < i + 16; i1++) {
+            for (j1 = i; j1 < i + 4; j1++)
+                B[j1][i1-8] = A[i1][j1+8];
+            for (; j1 < i + 8; j1++)
+                B[j1][i1-8] = A[i1][j1+8];
+        }
+        for (i1 = i; i1 < i + 8; i1++) { /* swap */
+            for (j1 = i; j1 < i + 4; j1++) {
+                tmp = B[j1][i1];
+                B[j1][i1] = B[j1+8][i1+8];
+                B[j1+8][i1+8] = tmp;
+            }
+            for (; j1 < i + 8; j1++) {
+                tmp = B[j1][i1];
+                B[j1][i1] = B[j1+8][i1+8];
+                B[j1+8][i1+8] = tmp;
+            }
+        }
+    }
+}
+
 /*
  * registerFunctions - This function registers your transpose
  *     functions with the driver.  At runtime, the driver will
@@ -220,7 +275,10 @@ void registerFunctions()
     //registerTransFunction(block8_for64, "block8 for 64x64 matrix");
     //registerTransFunction(avoid_eviction, "avoid eviction caused in square matrix");
     //registerTransFunction(opfor64, "simple");
-    registerTransFunction(opfor64_m, "FOR 64x64 matrix. mirror");
+    //registerTransFunction(opfor64_m, "FOR 64x64 matrix. mirror");
+    //registerTransFunction(opfor64_f, "avoid same-row-and-block-eviction");
+    registerTransFunction(block8x4_ref, "block 8x4 ref");
+    registerTransFunction(block8x4_opt, "block 8x4 optimized");
 }
 
 /* 
