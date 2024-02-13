@@ -218,42 +218,36 @@ void block8x4_ref(int M, int N, int A[N][M], int B[M][N])
 
 void block8x4_opt(int M, int N, int A[N][M], int B[M][N])
 {
-    register int i, j, i1, j1, tmp;
-    for (i = 0; i < N; i += 8)
-        for (j = 0; j < M; j += 4) {
-            if (j < i + 8 && j >= i) /* if same-row-and-block, j = i or j = i + 4 */
-                continue;
-            for (i1 = i; i1 < i + 8 ; i1++) {
-                for (j1 = j; j1 < j + 4 ; j1++) {
-                    tmp = A[i1][j1];
-                    B[j1][i1] = tmp;
+    register int i, j, i1, j1;
+    for (i = 0; i < N; i += 8) {
+        for (j = i; j < i + 8; j += 4) {
+            for (i1 = i; i1 < i + 8; i1++) {
+                for (j1 = j; j1 < j + 4; j1++) { /* store to another block */
+                    if (i != M - 8) 
+                                    /* store it to last block */
+                        B[j1-i+M-8][i1-i+N-8] = A[i1][j1];
+                    else 
+                                   /* 
+                                    * if its the last 8x8 block,
+                                    * store it to the left block
+                                    */
+                        B[j1][i1-8] = A[i1][j1];
                 }
             }
+            for (j1 = j; j1 < j + 4; j1++)
+                for (i1 = i; i1 < i + 8; i1++) {
+                        B[j1][i1] = \
+                        (i != M - 8)? B[j1-i+M-8][i1-i+N-8] : B[j1][i1-8];
+                }
         }
-    for (i = 0; i < N; i += 16) { /* diagonal swap storing */
-        for (i1 = i; i1 < i + 8; i1++) { /* store */
-            for (j1 = i; j1 < i + 4; j1++)
-                B[j1+8][i1+8] = A[i1][j1];
-            for (; j1 < i + 8; j1++)
-                B[j1+8][i1+8] = A[i1][j1];
-        }
-        for (; i1 < i + 16; i1++) {
-            for (j1 = i; j1 < i + 4; j1++)
-                B[j1][i1-8] = A[i1][j1+8];
-            for (; j1 < i + 8; j1++)
-                B[j1][i1-8] = A[i1][j1+8];
-        }
-        for (i1 = i; i1 < i + 8; i1++) { /* swap */
-            for (j1 = i; j1 < i + 4; j1++) {
-                tmp = B[j1][i1];
-                B[j1][i1] = B[j1+8][i1+8];
-                B[j1+8][i1+8] = tmp;
-            }
-            for (; j1 < i + 8; j1++) {
-                tmp = B[j1][i1];
-                B[j1][i1] = B[j1+8][i1+8];
-                B[j1+8][i1+8] = tmp;
-            }
+    }
+    for (i = 0; i < N; i += 8) {
+        for (j = 0; j < M; j += 4) {
+            if (j == i || j == i + 4) /* same block */
+                continue;
+            for (i1 = i; i1 < i + 8; i1++)
+                for (j1 = j; j1 < j + 4; j1++)
+                    B[j1][i1] = A[i1][j1];
         }
     }
 }
@@ -277,7 +271,7 @@ void registerFunctions()
     //registerTransFunction(opfor64, "simple");
     //registerTransFunction(opfor64_m, "FOR 64x64 matrix. mirror");
     //registerTransFunction(opfor64_f, "avoid same-row-and-block-eviction");
-    registerTransFunction(block8x4_ref, "block 8x4 ref");
+    //registerTransFunction(block8x4_ref, "block 8x4 ref");
     registerTransFunction(block8x4_opt, "block 8x4 optimized");
 }
 
