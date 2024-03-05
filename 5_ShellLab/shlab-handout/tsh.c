@@ -1,7 +1,7 @@
 /* 
  * tsh - A tiny shell program with job control
  * 
- * <Put your name and login ID here>
+ * Dilluti0n
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -231,6 +231,17 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
+    char *cmd = *argv[0];
+    if (!strcmp("quit", cmd)) {
+	fflush(stdout);
+	exit(0);
+    } else if (!strcmp("jobs", cmd)) {
+	listjobs(jobs);
+	return 1; /* is a builtin command */
+    } else if (!strcmp("bg", cmd) || !strcmp("fg", cmd)) {
+	do_bgfg(argv);
+	return 1;
+    }
     return 0;     /* not a builtin command */
 }
 
@@ -504,6 +515,3 @@ void sigquit_handler(int sig)
     printf("Terminating after receipt of SIGQUIT signal\n");
     exit(1);
 }
-
-
-
