@@ -64,6 +64,9 @@ void sigchld_handler(int sig);
 void sigtstp_handler(int sig);
 void sigint_handler(int sig);
 
+/* my helper functions */
+void listbgjobs(struct job_t *jobs);
+
 /* Here are helper routines that we've provided for you */
 int parseline(const char *cmdline, char **argv); 
 void sigquit_handler(int sig);
@@ -236,7 +239,7 @@ int builtin_cmd(char **argv)
 	fflush(stdout);
 	exit(0);
     } else if (!strcmp("jobs", cmd)) {
-	listjobs(jobs);
+	listbgjobs(jobs);
 	return 1; /* is a builtin command */
     } else if (!strcmp("bg", cmd) || !strcmp("fg", cmd)) {
 	do_bgfg(argv);
@@ -300,6 +303,26 @@ void sigtstp_handler(int sig)
 /*********************
  * End signal handlers
  *********************/
+
+/********************
+ * My helper routines
+ ********************/
+
+void listbgjobs(struct job_t *jobs)
+{
+    int i;
+    
+    for (i = 0; i < MAXJOBS; i++) {
+	if (jobs[i].pid != 0 && jobs[i].state == BG) {
+	    printf("[%d] (%d) ", jobs[i].jid, jobs[i].pid);
+	    printf("%s", jobs[i].cmdline);
+	}
+    }
+}
+
+/************************
+ * End My helper routines
+ ************************/
 
 /***********************************************
  * Helper routines that manipulate the job list
