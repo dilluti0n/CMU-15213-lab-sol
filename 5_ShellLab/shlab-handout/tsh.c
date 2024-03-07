@@ -167,7 +167,7 @@ int main(int argc, char **argv)
  * each child process must have a unique process group ID so that our
  * background children don't receive SIGINT (SIGTSTP) from the kernel
  * when we type ctrl-c (ctrl-z) at the keyboard.  
-*/
+ */
 void eval(char *cmdline) 
 {
     char *argv[MAXARGS]; /* array that we will store pointers to args */
@@ -190,8 +190,14 @@ void eval(char *cmdline)
 
     /* child process */
     if (cpid == 0) {
+	/*
+	 * set process group id to child process's pid.
+	 * now each child process's pgid are unique.
+	 */
+	if (setpgid(0, 0) < 0)
+	    unix_error("setpgid error");
 	Sigprocmask(SIG_UNBLOCK, &mask, NULL); /* Unblock SIGCHLD */
-	if (execve(argv[0], argv, environ) < 0) {
+	if (execve(argv[0], argv, environ) < 0) { /* Execute `argv[0]` */
 	    printf("%s: Command not found\n", argv[0]);
 	    exit(0);
 	}
