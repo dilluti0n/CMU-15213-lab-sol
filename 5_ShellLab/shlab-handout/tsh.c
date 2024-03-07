@@ -69,6 +69,7 @@ void listbgjobs(struct job_t *jobs);
 int Sigprocmask(int how, const sigset_t *restrict set,
 		sigset_t *restrict oset);
 int Kill(pid_t pid, int sig);
+void printjobpid(pid_t pid);
 
 /* Here are helper routines that we've provided for you */
 int parseline(const char *cmdline, char **argv); 
@@ -152,6 +153,7 @@ int main(int argc, char **argv)
 	/* Evaluate the command line */
 	eval(cmdline);
 	fflush(stdout);
+	fflush(stdout);
     } 
 
     exit(0); /* control never reaches here */
@@ -206,6 +208,13 @@ void eval(char *cmdline)
     int state = isbg ? BG : FG;
     if (addjob(jobs, cpid, state, cmdline) == 0) /* too many job */
 	Kill(cpid, SIGKILL); /* addjob failed. kill the job */
+    if (state == FG) {
+	/* shell shall wait until foreground job stoped or terminated */
+	if (waitpid(cpid, NULL, WUNTRACED) < 0)
+	    unix_error("waitpid error");        
+    } else { /* state == BG */
+	printjobpid(cpid); /* print [jid] (pid) ... for background job */
+    }
     Sigprocmask(SIG_UNBLOCK, &mask, NULL); /* Unblock SIGCHLD */
 }
 
@@ -352,7 +361,7 @@ void listbgjobs(struct job_t *jobs)
     int i;
     
     for (i = 0; i < MAXJOBS; i++) {
-	if (jobs[i].pid != 0 && jobs[i].state == BG) {
+	if (jobs[i].pid != 0 && jobs[i].state != FG) {
 	    printf("[%d] (%d) ", jobs[i].jid, jobs[i].pid);
 	    printf("%s", jobs[i].cmdline);
 	}
@@ -374,6 +383,17 @@ int Kill(pid_t pid, int sig)
     if ((res = kill(pid, sig)) < 0)
 	unix_error("kill error");
     return res;
+}
+
+/* printjobpid - print job by pid */
+void printjobpid(pid_t pid)
+{
+    struct job_t *job; /* pointer to process's job structure */
+
+    if ((job = getjobpid(jobs, pid)) == NULL)
+	return;
+    printf("[%d] (%d) ", job->jid, job->pid);
+    printf("%s", job->cmdline);
 }
 
 /************************
