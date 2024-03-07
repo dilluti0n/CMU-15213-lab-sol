@@ -66,6 +66,8 @@ void sigint_handler(int sig);
 
 /* my helper functions */
 void listbgjobs(struct job_t *jobs);
+int Sigprocmask(int how, const sigset_t *restrict set,
+		sigset_t *restrict oset);
 
 /* Here are helper routines that we've provided for you */
 int parseline(const char *cmdline, char **argv); 
@@ -168,7 +170,38 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
-    return;
+    char *argv[MAXARGS]; /* array that we will store pointers to args */
+    int isbg; /* is background job? 1:0 */
+    
+    isbg = parseline(cmdline, argv); /* parse cmdline to arg list */
+    if (builtin_cmd(argv) == 1)
+	return; /* argv[0] is builtin cmd (jobs, fg, bg) */
+
+    /* set sigset mask for SIGCHLD */
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGCHLD);
+    Sigprocmask(SIG_BLOCK, &mask, NULL); /* Block SIGCHLD */
+    
+    /* now argv[0] is not builtin cmd, try to fork and execute */
+    pid_t cpid;
+    if ((cpid = fork()) < 0)
+	unix_error("fork error");
+
+    /* child process */
+    if (cpid == 0) {
+	Sigprocmask(SIG_UNBLOCK, &mask, NULL); /* Unblock SIGCHLD */
+	if (execve(argv[0], argv, environ) < 0) {
+	    printf("%s: Command not found\n", argv[0]);
+	    exit(0);
+	}
+	/* useless space */
+    }
+
+    /* parant process(shell) */
+    int state = isbg ? BG : FG;
+    addjob(jobs, cpid, state, cmdline);
+    Sigprocmask(SIG_UNBLOCK, &mask, NULL); /* Unblock SIGCHLD */
 }
 
 /* 
@@ -234,13 +267,13 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
-    char *cmd = *argv[0];
+    const char *cmd = argv[0];
     if (!strcmp("quit", cmd)) {
 	fflush(stdout);
 	exit(0);
     } else if (!strcmp("jobs", cmd)) {
 	listbgjobs(jobs);
-	return 1; /* is a builtin command */
+	return 1;  /* is a builtin command */
     } else if (!strcmp("bg", cmd) || !strcmp("fg", cmd)) {
 	do_bgfg(argv);
 	return 1;
@@ -253,6 +286,7 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
+    
     return;
 }
 
@@ -319,6 +353,15 @@ void listbgjobs(struct job_t *jobs)
 	}
     }
 }
+
+ int Sigprocmask(int how, const sigset_t *restrict set,
+		 sigset_t *restrict oset)
+ {
+     int res;
+     if ((res = sigprocmask(how, set, oset)) == 1)
+	 unix_error("sigprocmask error");
+     return res;
+ }
 
 /************************
  * End My helper routines
