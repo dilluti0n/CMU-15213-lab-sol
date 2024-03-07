@@ -68,6 +68,7 @@ void sigint_handler(int sig);
 void listbgjobs(struct job_t *jobs);
 int Sigprocmask(int how, const sigset_t *restrict set,
 		sigset_t *restrict oset);
+int Kill(pid_t pid, int sig);
 
 /* Here are helper routines that we've provided for you */
 int parseline(const char *cmdline, char **argv); 
@@ -151,7 +152,6 @@ int main(int argc, char **argv)
 	/* Evaluate the command line */
 	eval(cmdline);
 	fflush(stdout);
-	fflush(stdout);
     } 
 
     exit(0); /* control never reaches here */
@@ -190,10 +190,8 @@ void eval(char *cmdline)
 
     /* child process */
     if (cpid == 0) {
-	/*
-	 * set process group id to child process's pid.
-	 * now each child process's pgid are unique.
-	 */
+	/* set process group id to child process's pid.
+	 * now each child process's pgid are unique. */
 	if (setpgid(0, 0) < 0)
 	    unix_error("setpgid error");
 	Sigprocmask(SIG_UNBLOCK, &mask, NULL); /* Unblock SIGCHLD */
@@ -206,7 +204,8 @@ void eval(char *cmdline)
 
     /* parant process(shell) */
     int state = isbg ? BG : FG;
-    addjob(jobs, cpid, state, cmdline);
+    if (addjob(jobs, cpid, state, cmdline) == 0) /* too many job */
+	Kill(cpid, SIGKILL); /* addjob failed. kill the job */
     Sigprocmask(SIG_UNBLOCK, &mask, NULL); /* Unblock SIGCHLD */
 }
 
@@ -360,14 +359,22 @@ void listbgjobs(struct job_t *jobs)
     }
 }
 
- int Sigprocmask(int how, const sigset_t *restrict set,
-		 sigset_t *restrict oset)
- {
-     int res;
-     if ((res = sigprocmask(how, set, oset)) == 1)
-	 unix_error("sigprocmask error");
-     return res;
- }
+int Sigprocmask(int how, const sigset_t *restrict set,
+		sigset_t *restrict oset)
+{
+    int res;
+    if ((res = sigprocmask(how, set, oset)) == 1)
+	unix_error("sigprocmask error");
+    return res;
+}
+
+int Kill(pid_t pid, int sig)
+{
+    int res;
+    if ((res = kill(pid, sig)) < 0)
+	unix_error("kill error");
+    return res;
+}
 
 /************************
  * End My helper routines
