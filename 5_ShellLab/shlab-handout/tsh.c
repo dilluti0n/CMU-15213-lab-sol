@@ -210,8 +210,7 @@ void eval(char *cmdline)
 	Kill(cpid, SIGKILL); /* addjob failed. kill the job */
     if (state == FG) {
 	/* shell shall wait until foreground job stoped or terminated */
-	if (waitpid(cpid, NULL, WUNTRACED) < 0)
-	    unix_error("waitpid error");        
+	waitfg(cpid);        
     } else { /* state == BG */
 	printjobpid(cpid); /* print [jid] (pid) ... for background job */
     }
@@ -309,7 +308,24 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
-    return;
+    struct job_t *job; /* pointer to job struct of pid */
+    int state;
+    if ((job = getjobpid(jobs, pid)) == NULL)
+	return; /* there is no job with corresponding pid */
+    if ((state = job->state) != FG)
+	return; /* do not do useless things when pid is not fg process */
+    
+    sigset_t mask;
+    sigfillset(&mask);
+    sigdelset(&mask, SIGCHLD); /* mask is set to only recieve SIGCHLD */
+
+    while (state == FG) {
+	sigsuspend(&mask); /* suspend current process until recieve SIGCHLD */
+	if (errno != EINTR)
+	    unix_error("sigsuspend error");
+	state = job->state; /* if job has been deleted, state is set to UNDEF
+			     * or stopped, state is set to ST */
+    }
 }
 
 /*****************
