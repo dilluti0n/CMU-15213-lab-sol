@@ -212,7 +212,7 @@ void eval(char *cmdline)
 	/* shell shall wait until foreground job stoped or terminated */
 	waitfg(cpid);        
     } else { /* state == BG */
-	printjobpid(cpid); /* print [jid] (pid) ... for background job */
+	printjobpid(cpid); /* print [jid] (pid) cmdline for background job */
     }
     Sigprocmask(SIG_UNBLOCK, &mask, NULL); /* Unblock SIGCHLD */
 }
@@ -341,7 +341,38 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
-    return;
+    int cstat; /* status when child terminated */
+    int olderrno = errno;
+    pid_t pid;
+    sigset_t mask_all, prev;
+
+    sigfillset(&mask_all);
+    Sigprocmask(SIG_BLOCK, &mask_all, &prev);
+    while ((pid = waitpid((pid_t) -1, &cstat, WNOHANG | WUNTRACED)) > 0) {
+	struct job_t *job;
+	if ((job = getjobpid(jobs, pid)) == NULL) { /* this should not happen */
+	    Sigprocmask(SIG_SETMASK, &prev, NULL);
+	    break;
+	}
+	if (WIFSTOPPED(cstat)) { /* job is stopped */
+	    printf("Job [%d] (%d) stopped by signal %d\n", job->jid,
+		   job->pid, WSTOPSIG(cstat));
+	    job->state = ST;	    
+	} else { /* job is terminated */
+	    if (WIFSIGNALED(cstat)) { /* process terminated by signal */
+		printf("Job [%d] (%d) terminated by signal %d\n", job->jid,
+		       job->pid, WIFSTOPPED(cstat));
+	    }
+	    /* no need to call deletejob() and do one more search for pid
+	     * since we already have job entry by getjobpid() */
+	    clearjob(job);
+	    nextjid = maxjid(jobs) + 1;
+	}
+    }
+    Sigprocmask(SIG_SETMASK, &prev, NULL);
+    if (pid < 0 && errno != ECHILD) /* ECHILD - no child process */
+	unix_error("waitpid error");
+    errno = olderrno;
 }
 
 /* 
@@ -378,7 +409,7 @@ void listbgjobs(struct job_t *jobs)
     
     for (i = 0; i < MAXJOBS; i++) {
 	if (jobs[i].pid != 0 && jobs[i].state != FG) {
-	    printf("[%d] (%d) ", jobs[i].jid, jobs[i].pid);
+	    printf("[%d] (%d) Running ", jobs[i].jid, jobs[i].pid);
 	    printf("%s", jobs[i].cmdline);
 	}
     }
