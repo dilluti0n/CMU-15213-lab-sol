@@ -70,6 +70,8 @@ int Sigprocmask(int how, const sigset_t *restrict set,
 		sigset_t *restrict oset);
 int Kill(pid_t pid, int sig);
 void printjobpid(pid_t pid);
+int parsebgfgarg(const char *argv1, int *id);
+int bg2fg(struct job_t *bgjob);
 
 /* Here are helper routines that we've provided for you */
 int parseline(const char *cmdline, char **argv); 
@@ -299,8 +301,62 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
-    
-    return;
+    const char *arg = argv[1];
+    if (!strcmp("fg", argv[0])) {
+	if (arg == NULL) { 	/* no argument for command fg */
+	    printf("fg command requires PID or %%jobid argument\n");
+	    return;
+	}
+	int id, ispid;
+	if ((ispid = parsebgfgarg(arg, &id)) < 0) { /* invalid argument */
+	    printf("fg: argument must be a PID or %%jobid\n");
+	    return;
+	}
+	if (ispid) {
+	    if (bg2fg(getjobpid(jobs, (pid_t) id)) == 0) {
+		printf("(%d): no such process\n", id);
+		return;
+	    }
+	} else {
+	    if (bg2fg(getjobjid(jobs, id)) == 0) {
+		printf("%%%d: no such job\n", id);
+		return;
+	    }
+	}
+    } else if (!strcmp("bg", argv[0])) {
+	if (arg == NULL) {	/* no argument for command bg */
+	    printf("bg command requires PID or %%jobid argument\n");
+	    return;
+	}
+	int id, ispid;
+	struct job_t *job;			    /* target job */
+
+	if ((ispid = parsebgfgarg(arg, &id)) < 0) { /* invalid argument */
+	    printf("bg: argument must be a PID or %%jobid\n");
+	    return;
+	}
+	if (ispid) {
+	    if ((job = getjobpid(jobs, (pid_t) id)) == NULL) {
+		printf("(%d): no such process\n", id);
+		return;
+	    }
+	    if (job->state == ST) {
+		job->state = BG;
+		Kill(job->pid, SIGCONT);
+	    }
+	    printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
+	} else { /* id is jid */
+	    if ((job = getjobjid(jobs, id)) == NULL) {
+		printf("%%%d: no such job\n", id);
+		return;
+	    }
+	    if (job->state == ST) {
+		job->state = BG;
+		Kill(job->pid, SIGCONT);
+	    }
+	    printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
+	}
+    }   
 }
 
 /* 
@@ -481,10 +537,68 @@ void printjobpid(pid_t pid)
 {
     struct job_t *job; /* pointer to process's job structure */
 
-    if ((job = getjobpid(jobs, pid)) == NULL)
-	return;
-    printf("[%d] (%d) ", job->jid, job->pid);
-    printf("%s", job->cmdline);
+    if ((job = getjobpid(jobs, pid)) != NULL) {
+	printf("[%d] (%d) ", job->jid, job->pid);
+	printf("%s", job->cmdline);
+    }
+}
+
+/*
+ * parsebgfgarg - parse argument for internal command fg, bg
+ *         return -1 if argv1 is invalid, 0 if %<jid>, 1 if <pid>
+ */
+int parsebgfgarg(const char *argv1, int *id)
+{
+    if (argv1 == NULL || id == NULL)
+	return -1;
+
+    int ispid = 1;
+    if (*argv1 == '%') { /* jid */
+	ispid = 0;
+	argv1++;
+    }
+    if (!isdigit(*argv1)) /* invalid */
+	return -1;
+
+    /* parse the number from argv */
+    char buf[MAXLINE]; 		/* buffer to store <id> */
+    int bufp = 0, c;
+    const int lim = MAXLINE - 1;
+    while (isdigit(c = *argv1++) && bufp < lim)
+	buf[bufp++] = c;
+    buf[bufp] = '\0';
+
+    /* store it to id */
+    *id = atoi(buf);
+    return ispid;
+}
+/*
+ * bg2fg - switch background job to foregrond. retrun 0 if bgjob is NULL,
+ *       return -1 if fatal error(bgjob is foreground job),
+ *       return positive if no error.
+ */
+int bg2fg(struct job_t *bgjob)
+{
+    if (bgjob == NULL)
+	return 0;
+    if (bgjob->state == FG)
+	return -1; /* fatal error */
+    
+    switch(bgjob->state) {
+    case FG: /* this should not happen */
+	break;
+    case ST:
+	bgjob->state = FG;
+	Kill(-bgjob->pid, SIGCONT);
+	break;
+    case BG:
+	bgjob->state = FG;
+	break;
+    default:
+	break;
+    }
+    waitfg(bgjob->pid);		/* suspend shell for foreground job */
+    return 1;
 }
 
 /************************
