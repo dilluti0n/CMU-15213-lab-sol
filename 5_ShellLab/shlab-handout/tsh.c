@@ -178,6 +178,9 @@ void eval(char *cmdline)
     int isbg; /* is background job? 1:0 */
     
     isbg = parseline(cmdline, argv); /* parse cmdline to arg list */
+    if (argv[0] == NULL)
+	return;			/* invalid format of cmdline */
+    
     if (builtin_cmd(argv) == 1)
 	return; /* argv[0] is builtin cmd (jobs, fg, bg) */
 
