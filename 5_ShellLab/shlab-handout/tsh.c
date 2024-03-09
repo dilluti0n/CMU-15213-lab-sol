@@ -318,13 +318,16 @@ void waitfg(pid_t pid)
     sigset_t mask;
     sigfillset(&mask);
     sigdelset(&mask, SIGCHLD); /* mask is set to only recieve SIGCHLD */
+    sigdelset(&mask, SIGINT);  /* ... and SIGINT */
+    sigdelset(&mask, SIGTSTP); /* ... and SIGTSTP */
+    sigdelset(&mask, SIGSTOP);  /* ... and also SIGSTOP */
 
     while (state == FG) {
 	sigsuspend(&mask); /* suspend current process until recieve SIGCHLD */
 	if (errno != EINTR)
 	    unix_error("sigsuspend error");
 	state = job->state; /* if job has been deleted, state is set to UNDEF
-			     * or stopped, state is set to ST */
+			     * or job has been stopped, state is set to ST */
     }
 }
 
@@ -339,16 +342,21 @@ void waitfg(pid_t pid)
  *     available zombie children, but doesn't wait for any other
  *     currently running children to terminate.  
  */
-void sigchld_handler(int sig) 
+void sigchld_handler(int sig)
 {
     int cstat; /* status when child terminated */
     int olderrno = errno;
     pid_t pid;
     sigset_t mask_all, prev;
 
-    sigfillset(&mask_all);
-    Sigprocmask(SIG_BLOCK, &mask_all, &prev);
+    sigfillset(&mask_all);	/* block all signals while processing */
+    
+    /* note: we shouldn't block call of waitpid because if we block it and
+     * child terminates while the last call of waitpid (return value -1 and
+     * errno = ECHILD) our shell has no informantion about terminated process
+     */
     while ((pid = waitpid((pid_t) -1, &cstat, WNOHANG | WUNTRACED)) > 0) {
+	Sigprocmask(SIG_BLOCK, &mask_all, &prev);
 	struct job_t *job;
 	if ((job = getjobpid(jobs, pid)) == NULL) { /* this should not happen */
 	    Sigprocmask(SIG_SETMASK, &prev, NULL);
@@ -361,16 +369,16 @@ void sigchld_handler(int sig)
 	} else { /* job is terminated */
 	    if (WIFSIGNALED(cstat)) { /* process terminated by signal */
 		printf("Job [%d] (%d) terminated by signal %d\n", job->jid,
-		       job->pid, WIFSTOPPED(cstat));
+		       job->pid, WTERMSIG(cstat));
 	    }
 	    /* no need to call deletejob() and do one more search for pid
 	     * since we already have job entry by getjobpid() */
 	    clearjob(job);
 	    nextjid = maxjid(jobs) + 1;
 	}
+	Sigprocmask(SIG_SETMASK, &prev, NULL);
     }
-    Sigprocmask(SIG_SETMASK, &prev, NULL);
-    if (pid < 0 && errno != ECHILD) /* ECHILD - no child process */
+    if (pid < 0 && errno != ECHILD && errno != EINTR)
 	unix_error("waitpid error");
     errno = olderrno;
 }
@@ -382,7 +390,18 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
-    return;
+    int olderrno = errno;
+    pid_t pid; 			/* pid of foreground process */
+    sigset_t mask, prev;
+
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);   /* SIGINT should not be nested */
+    Sigprocmask(SIG_BLOCK, &mask, &prev);
+    if((pid = fgpid(jobs)) != 0)
+	Kill(-pid, SIGINT);	/* send SIGINT to the foreground process */
+    Sigprocmask(SIG_SETMASK, &prev, NULL);
+
+    errno = olderrno;
 }
 
 /*
@@ -392,7 +411,18 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
-    return;
+    int olderrno = errno;
+    pid_t pid; 			 /* pid of foreground process */
+    sigset_t mask, prev;
+
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGTSTP);   /* SIGTSTP should not be nested */
+    Sigprocmask(SIG_BLOCK, &mask, &prev);
+    if((pid = fgpid(jobs)) != 0)
+	Kill(-pid, SIGTSTP);     /* send SIGTSTP to the foreground process */
+    Sigprocmask(SIG_SETMASK, &prev, NULL);
+
+    errno = olderrno;
 }
 
 /*********************
@@ -409,7 +439,21 @@ void listbgjobs(struct job_t *jobs)
     
     for (i = 0; i < MAXJOBS; i++) {
 	if (jobs[i].pid != 0 && jobs[i].state != FG) {
-	    printf("[%d] (%d) Running ", jobs[i].jid, jobs[i].pid);
+	    printf("[%d] (%d) ", jobs[i].jid, jobs[i].pid);
+	    switch (jobs[i].state) {
+	    case BG: 
+		printf("Running ");
+		break;
+	    case FG: 
+		printf("Foreground ");
+		break;
+	    case ST: 
+		printf("Stopped ");
+		break;
+	    default:
+		printf("%s: Internal error: job[%d].state=%d ", 
+		       __func__, i, jobs[i].state);
+	    }
 	    printf("%s", jobs[i].cmdline);
 	}
     }
