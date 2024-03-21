@@ -4,6 +4,35 @@
  * Slow, but good memory efficiancy.
  * ----
  * NOTE: This code is for 32-bit system; Compile it with -m32 flag.
+ * ----(ALIGNMENT)----
+ * mm_init() sets heap like this:
+ *
+ * 0                      4                      8
+ * |<----------------SIZE_T_SIZE---------------->|
+ * |<---SIZE_T_PADDING--->|<---sizeof(size_t)--->|
+ * |(This area is padding)|(This area is header) |
+ * |----------------------|----------0/1---------|
+ * :"0/1" indicates that the block is size 0, and is alloacted(1)
+ * with the area itself storing data (size_t) 0 & 0x1.
+ *
+ * The first call to mm_malloc(size) expands the heap by calling
+ * mem_sbrk(ALIGN(size + SIZE_T_SIZE)). Note that `size` refers to the
+ * payload size.
+ *
+ * |<--SIZE_T_SIZE-->|<-----------ALIGN(size + SIZE_T_SIZE)----------->|
+ * |padding|---0/1---|<-------`size`------->|padding?|padding|---?/?---|
+ * |**(A)**|***(B)***|*************(C)***************|**(A')*|***(B')**|
+ * :The size of additional padding (A') is 8 - `size` % 8, to ensure the block
+ * is aligned to 8 bytes.
+ *
+ * The payload uses area (C)+(A'), and area (B) serves as the block's header.
+ * the block size, still ALIGN(size + SIZE_T_SIZE), is stored in area (B)
+ * Finally, the area (B') is marked as tail block (0/1), signaling the end
+ * of the free list.
+ *
+ * As we marked (B') as 0/1, each subsequent increase in the heap size follows
+ * the same pattern, recursively aligning each block by marking the header
+ * and the last block.
  */
 #include <stdio.h>
 #include <stdlib.h>
