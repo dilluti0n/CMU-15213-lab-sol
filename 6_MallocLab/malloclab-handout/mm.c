@@ -45,8 +45,7 @@
 #include "memlib.h"
 
 static void *target_block(int blocksize);
-static int is_allocated(size_t header);
-static int set_allocated(size_t *p);
+static int set_header(size_t *header, size_t blocksize, int flag);
 
 /*********************************************************
  * NOTE TO STUDENTS: Before you do anything else, please
@@ -69,24 +68,26 @@ team_t team = {
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
 
-/* sizeof(size_t) = 4, ALIGN(4) = 8 */
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
-
-/* 8 - 4 */
 #define SIZE_T_PADDING SIZE_T_SIZE - sizeof(size_t)
+
+#define IS_ALLOCATED(header) ((header) & 0x1)
+
+/* flags for function set_header */
+#define HDR_FREE 0
+#define HDR_ALLOCATED 1
 
 /* 
  * mm_init - initialize the malloc package.
  */
 int mm_init(void)
 {
+    /* allocate initial block */
     void *p;
     if ((p = mem_sbrk(SIZE_T_SIZE)) == (void *)-1)
         return -1;
     p = (void *)((char *)p + SIZE_T_PADDING); /* Set p as pointer to header */
-    *(size_t *)p = 0;
-    set_allocated(p);
-    
+    set_header(p, 0, HDR_ALLOCATED);
     return 0;
 }
 
@@ -101,8 +102,8 @@ void *mm_malloc(size_t size)
     
     /* Traverse the free list. */
     if ((p = target_block(blksize)) != NULL) /* pointer to new block's header */
-        return (void *)((char *)p + sizeof(size_t));
-    
+        return (void *)((char *)p + sizeof(size_t)); /* return pointer to
+                                                        payload */
     /* There is no appropriate free block on the heap. */
     p = mem_sbrk(blksize);      /* pointer to new block's payload */
     if (p == (void *)-1) {
@@ -110,14 +111,12 @@ void *mm_malloc(size_t size)
     } else {
         /* Store block size to header */
         size_t *hp = (size_t *)((char *)p - sizeof(size_t));
-        *hp = blksize;
-        set_allocated(hp);
+        set_header(hp, blksize, HDR_ALLOCATED);
 
         /* Set header of last block as 0/1 */
         size_t *lhp = (size_t *)((char *)hp + blksize);
-        *lhp = 0;
-        set_allocated(lhp);
-        
+        set_header(lhp, 0, HDR_ALLOCATED);
+
         return (void *) p;      /* return pointer to payload */
     }
 }
@@ -167,7 +166,7 @@ static void *target_block(int blocksize)
 
     while (size != 0) {
         /* If p is the appropriate block, load it to dest */
-        if (!is_allocated(*p) && size >= blocksize && size < min) {
+        if (!IS_ALLOCATED(*p) && size >= blocksize && size < min) {
             dest = p;
             min = size;
         }
@@ -180,18 +179,19 @@ static void *target_block(int blocksize)
 }
 
 /*
- * is_allocated - Check if LSB of header is 1
+ * set_header - set block's header to blocksize marked with flag.
+ *      if blocksize is negative, just mark to header's element.
+ *      flag should be only HDR_FREE or HDR_ALLOCATED.
+ *      return -1 if header is NULL, 0 if no error.
  */
-static int is_allocated(size_t header)
+static int set_header(size_t *header, size_t blocksize, int flag)
 {
-    return header & 0x1;
-}
-
-static int set_allocated(size_t *p)
-{
-    if (p == NULL)
+    if (header == NULL)
         return -1;
-    *p |= 0x1;                  /* set LSB to 1 */
+    if (blocksize < 0)
+        *header |= flag;
+    else
+        *header = blocksize | flag;
     return 0;
 }
 
