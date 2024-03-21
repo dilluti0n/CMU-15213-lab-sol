@@ -13,21 +13,22 @@
  * |(This area is padding)|(This area is header) |
  * |----------------------|----------0/1---------|
  * :"0/1" indicates that the block is size 0, and is alloacted(1)
- * with the area itself storing data (size_t) 0 & 0x1.
+ * with the area itself storing a (size_t) value 0 & 0x1.
  *
- * The first call to mm_malloc(size) expands the heap by calling
- * mem_sbrk(ALIGN(size + SIZE_T_SIZE)). Note that `size` refers to the
- * payload size.
+ * The first call to mm_malloc(`size`) expands the heap by calling
+ * mem_sbrk(ALIGN(size + sizeof(size_t))). Note that `size`
+ * refers to the required payload size. We need to allocate
+ * more space than that and serve to caller.
  *
- * |<--SIZE_T_SIZE-->|<-----------ALIGN(size + SIZE_T_SIZE)----------->|
- * |padding|---0/1---|<-------`size`------->|padding?|padding|---?/?---|
- * |**(A)**|***(B)***|*************(C)***************|**(A')*|***(B')**|
- * :The size of additional padding (A') is 8 - `size` % 8, to ensure the block
- * is aligned to 8 bytes.
+ * |<--SIZE_T_SIZE-->|<-----ALIGN(size + sizeof(size_t))----->|
+ * |padding|---0/1---|<-------`size`------->|padding|---?/?---|
+ * |**(A)**|***(B)***|**********(C)*********|**(A')*|***(B')**|
+ * |///////|----------------(block)-----------------|--(tail)-|
  *
  * The payload uses area (C)+(A'), and area (B) serves as the block's header.
- * the block size, still ALIGN(size + SIZE_T_SIZE), is stored in area (B)
- * Finally, the area (B') is marked as tail block (0/1), signaling the end
+ * The block size, still ALIGN(size + sizeof(size_t)), since (B) and (B') are
+ * both same size (sizeof(size_t)), is stored in area (B). Finally,
+ * the area (B') is marked as tail block (0/1), signaling the end
  * of the free list.
  *
  * As we marked (B') as 0/1, each subsequent increase in the heap size follows
@@ -43,7 +44,6 @@
 #include "mm.h"
 #include "memlib.h"
 
-/* My helper routines */
 static void *target_block(int blocksize);
 static int is_allocated(size_t header);
 static int set_allocated(size_t *p);
@@ -96,17 +96,17 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
-    const int blksize = ALIGN(size + SIZE_T_SIZE); /* Block size to malloc */
-    void *p;                                   /* Pointer to malloced block */
+    void *p;
+    const int blksize = ALIGN(size + sizeof(size_t)); /* Block size to malloc */
     
     /* Traverse the free list. */
-    if ((p = target_block(blksize)) != NULL)
+    if ((p = target_block(blksize)) != NULL) /* pointer to new block's header */
         return (void *)((char *)p + sizeof(size_t));
     
     /* There is no appropriate free block on the heap. */
-    p = mem_sbrk(blksize);
+    p = mem_sbrk(blksize);      /* pointer to new block's payload */
     if (p == (void *)-1) {
-	return NULL;
+        return NULL;
     } else {
         /* Store block size to header */
         size_t *hp = (size_t *)((char *)p - sizeof(size_t));
