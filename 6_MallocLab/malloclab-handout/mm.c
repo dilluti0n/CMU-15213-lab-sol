@@ -44,7 +44,7 @@
 #include "mm.h"
 #include "memlib.h"
 
-static void *target_block(int blocksize);
+static void *get_target_block(size_t blocksize);
 static int set_header(size_t *header, size_t blocksize, int flag);
 
 /*********************************************************
@@ -98,10 +98,10 @@ int mm_init(void)
 void *mm_malloc(size_t size)
 {
     void *p;
-    const int blksize = ALIGN(size + sizeof(size_t)); /* Block size to malloc */
+    const size_t blksize = ALIGN(size + sizeof(size_t)); /* Block size to malloc */
     
     /* Traverse the free list. */
-    if ((p = target_block(blksize)) != NULL) /* pointer to new block's header */
+    if ((p = get_target_block(blksize)) != NULL) /* pointer to new block's header */
         return (void *)((char *)p + sizeof(size_t)); /* return pointer to
                                                         payload */
     /* There is no appropriate free block on the heap. */
@@ -153,10 +153,10 @@ void *mm_realloc(void *ptr, size_t size)
  **********************/
 
 /*
- * target_block - return the pointer to head of appropriate free block while
- *       traverse the implicit list. return NULL if there is no space.
+ * get_target_block - return the pointer to head of appropriate free block while
+ *       traversing the implicit list. return NULL if there is no space.
  */
-static void *target_block(int blocksize)
+static void *get_target_block(size_t blocksize)
 {
     char *p = (char *) mem_heap_lo() + SIZE_T_PADDING; /* Pointer to each
                                                         * block's header */
