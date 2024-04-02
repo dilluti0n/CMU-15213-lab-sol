@@ -34,11 +34,30 @@
  * As we marked (B') as 0/1, each subsequent increase in the heap size follows
  * the same pattern, recursively aligning each block by marking the header
  * and the last block.
+ * ----FLAGS----
+ * header element - `size_t` value that loaded on the header of block.
+ *      Each header elements are represented by (size)/(pfree)(alloc).
+ * (size)  - Size of block.
+ * (pfree) - Flag that indicates either previous block is free(1) or
+ *    allocated(0). Macro `HDR_PFREE` is flag for pfree.
+ * (alloc) - Flag that indicates either current block is allocated(1) or
+ *    free(0). Macro `HDR_ALLOC` is flag for alloc.
+ * The precise useage of each macros `HDR_FREE`, `HDR_PFREE`, `HDR_ALLOC`
+ * is defined on the comment of function `set_header`.
+ * ----FOOTER----
+ * Note that on this structure, every free block has `footer`, exact duplicate
+ * of its header, and located on the last `size_t` section of the block.
+ * It can be easily duplicated by function `set_footer`.
+ *
+ * The footer is used when (pfree) flag is turned on to next block, which is
+ * crucial for allocater, to indicate previous block's size.
  */
 
-/* NOW : Implement mm_free()
-   TODO: Documnetation, Improve readability for macros,
-        Increase abstraction level of macros related to HDR_ flags */
+/* 
+   TODO: Improve readability for macros,
+         Increase abstraction level of macros related to HDR_ flags,
+         Implement mm_realloc()
+*/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,7 +68,7 @@
 #include "mm.h"
 #include "memlib.h"
 
-static int block_size;
+static int block_size;          /* Size of block founded by get_target_block */
 
 static void *get_target_block(size_t blocksize);
 static int set_header(void *header, size_t blocksize, int flag);
@@ -98,7 +117,6 @@ team_t team = {
 #define HDR_ALLOC 1         /* This block is allocated */
 #define HDR_PFREE 2           /* Previous block is free */
 
-#define DEBUG
 #ifdef DEBUG
 #define DBG_CHECK printf("[%3i]: %s\n",__LINE__, __func__);
 #else
@@ -153,13 +171,15 @@ void *mm_malloc(size_t size)
 
     /* There is no appropriate free block on the heap. */
     p = (void *)((char *)mem_heap_hi() - sizeof(size_t) + 1);
-    size_t tmp = *(size_t *)p;           /* Header element of last block */
     size_t excess = blksize;             /* Requirement of heap */
-    if (IS_PFREE(tmp)) {
+
+    /* If previous block is free, new block should start at there. */
+    if (IS_PFREE(*(size_t *)p)) {
         size_t psize = *((size_t *)p - 1) & ~HDR_MASK; /* Previous block's size */
         excess -= psize;
         p = (void *)((char *)p - psize); /* Our block should start at here. */
     }
+    
     if (mem_sbrk(excess) == (void *)-1) {
         return NULL;
     }
@@ -239,8 +259,8 @@ void *mm_realloc(void *ptr, size_t size)
  * get_target_block - return the pointer to head of appropriate free block while
  *       traversing the implicit list. return NULL if there is no space.
  *
- *       Set global variable islastalloc as 1 if last iteration of searching
- *       block is allocated, 0 if free.
+ *       Set global variable block_size as the founded block's size to specify
+ *       the size of empty block after allocate.
  */
 static void *get_target_block(size_t blocksize)
 {
@@ -255,7 +275,7 @@ static void *get_target_block(size_t blocksize)
         if (!IS_ALLOC(*p) && size >= blocksize && size < min) {
             dest = p;
             min = size;
-            block_size = size;      /* Load this to indicate found block's size */
+            block_size = size;    /* Load this to indicate found block's size */
         }
         
         /* Traverse to the next block */
@@ -267,9 +287,14 @@ static void *get_target_block(size_t blocksize)
 
 /*
  * set_header - set block's header to blocksize marked with flag.
- *      if blocksize is negative, just mark to header's element.
- *      flag should be only HDR_FREE or HDR_ALLOC.
- *      return -1 if header is NULL, 0 if no error.
+ *      Return -1 if header is NULL, 0 if no error.
+ *
+ *        flag         previous block / current block
+ * ---------------------------------------------------
+ *      HDR_FREE          allocated       free
+ *      HDR_PFREE           free          free
+ *      HDR_ALLOC         allocated     allocated
+ * HDR_PFREE|HDR_ALLOC      free        allocated  
  */
 static int set_header(void *header, size_t blocksize, int flag)
 {
@@ -280,7 +305,7 @@ static int set_header(void *header, size_t blocksize, int flag)
 }
 
 /*
- * set_footer - Duplicate header to foot of block.
+ * set_footer - Duplicate header to last `size_t` part of block.
  */
 static int set_footer(void *header, size_t blocksize)
 {
@@ -289,7 +314,7 @@ static int set_footer(void *header, size_t blocksize)
 
     size_t *fp;                           /* pointer to footer */
 
-    /* Duplicate footer by header */
+    /* Duplicate header to footer */
     fp = (size_t *)((char *)header + blocksize - sizeof(size_t));
     *fp = *(size_t *)header;
     return 0;
