@@ -54,8 +54,7 @@
  */
 
 /* 
-   TODO: Improve readability for macros,
-         Increase abstraction level of macros related to HDR_ flags,
+   TODO: Increase abstraction level of macros related to HDR_ flags,
          Implement mm_realloc()
 */
 
@@ -111,6 +110,10 @@ team_t team = {
 
 #define IS_ALLOC(header) ((header)&HDR_ALLOC)
 #define IS_PFREE(header) ((header)&HDR_PFREE)
+
+/* Macros for parse size and flag for header element. */
+#define MM_SIZE(header) ((header)&~HDR_MASK)
+#define MM_FLAG(header) ((header)&HDR_MASK)
  
 /* flags for function set_header */
 #define HDR_FREE 0
@@ -175,7 +178,7 @@ void *mm_malloc(size_t size)
 
     /* If previous block is free, new block should start at there. */
     if (IS_PFREE(*(size_t *)p)) {
-        size_t psize = *((size_t *)p - 1) & ~HDR_MASK; /* Previous block's size */
+        size_t psize = MM_SIZE(*((size_t *)p - 1)); /* Previous block's size */
         excess -= psize;
         p = (void *)((char *)p - psize); /* Our block should start at here. */
     }
@@ -200,13 +203,13 @@ void mm_free(void *ptr)
 {
     char *p = (char *)ptr - sizeof(size_t);  /* Pointer to header */
     const size_t hdr = *(size_t *)p;         /* Header element */
-    size_t blksize = hdr & ~HDR_MASK;        /* Blocksize */
+    size_t blksize = MM_SIZE(hdr);           /* Blocksize */
     size_t flag = HDR_FREE;                  /* Flag for freeing block */
 
     /* Merge with next block */
     size_t tmp = *(size_t *)(p + blksize);   /* Header element of next block */
     if (!IS_ALLOC(tmp))
-        blksize += tmp & ~HDR_MASK;
+        blksize += MM_SIZE(tmp);
 
     /* Merge with previous block */
     if (IS_PFREE(hdr)) {
@@ -214,8 +217,8 @@ void mm_free(void *ptr)
         tmp = *(size_t *)(p - sizeof(size_t));
 
         /* Set flag and blocksize and header */
-        const size_t pbsize = tmp & ~HDR_MASK; /* Size of previous block */
-        flag = tmp & HDR_MASK;
+        const size_t pbsize = MM_SIZE(tmp); /* Size of previous block */
+        flag = MM_FLAG(tmp);
         blksize += pbsize;
         p -= pbsize;            /* Mearge two block */
     }
@@ -226,7 +229,7 @@ void mm_free(void *ptr)
 
     /* Set next block's marking */
     char *np = p + blksize;                /* Pointer to next block's header */
-    tmp = *(size_t *)np & ~HDR_MASK;            /* Next block's size */
+    tmp = MM_SIZE(*(size_t *)np);            /* Next block's size */
     set_header((size_t *)np, tmp, HDR_PFREE | HDR_ALLOC);
     DBG_CHECK
 }
@@ -266,7 +269,7 @@ static void *get_target_block(size_t blocksize)
 {
     char *p = (char *)mem_heap_lo() + SIZE_T_PADDING;
                                               /* Pointer to each block's header */
-    size_t size = *(size_t *)p & ~HDR_MASK;   /* Blocksize of current iteration. */
+    size_t size = MM_SIZE(*(size_t *)p);   /* Blocksize of current iteration. */
     void *dest = NULL;                        /* Target block. */
     size_t min = -1U;              /* Minimum blocksize for entire iteration */
 
@@ -280,7 +283,7 @@ static void *get_target_block(size_t blocksize)
         
         /* Traverse to the next block */
         p += size;
-        size = *(size_t *)p & ~HDR_MASK;
+        size = MM_SIZE(*(size_t *)p);
     }
     return dest;
 }
@@ -315,7 +318,7 @@ static int set_footer(void *header, size_t blocksize)
     size_t *fp;                           /* pointer to footer */
 
     /* Duplicate header to footer */
-    fp = (size_t *)((char *)header + blocksize - sizeof(size_t));
+    fp = (size_t *)(header + blocksize - sizeof(size_t));
     *fp = *(size_t *)header;
     return 0;
 }
