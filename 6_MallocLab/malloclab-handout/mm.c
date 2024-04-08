@@ -54,8 +54,8 @@
  */
 
 /* 
-   TODO: Increase abstraction level of macros related to HDR_ flags,
-         Implement mm_realloc()
+   TODO: Deal with binary-bal.rep (which allocates 448 64, free 448 and then
+         allocates 512.) << HOW?? 
 */
 
 #include <stdio.h>
@@ -135,7 +135,7 @@ int mm_init(void)
     void *p;
     if ((p = mem_sbrk(SIZE_T_SIZE)) == (void *)-1)
         return -1;
-    p = (void *)((char *)p + SIZE_T_PADDING); /* Set p as pointer to header */
+    p += SIZE_T_PADDING; /* Set p as pointer to header */
     set_header(p, 0, HDR_ALLOC);
     DBG_CHECK
     return 0;
@@ -148,7 +148,8 @@ int mm_init(void)
 void *mm_malloc(size_t size)
 {
     void *p;
-    const size_t blksize = ALIGN(size + sizeof(size_t)); /* Block size to malloc */
+                                               /* Block size to malloc */
+    const size_t blksize = ALIGN(size + sizeof(size_t));
     
     /* Traverse the free list. */
     if ((p = get_target_block(blksize)) != NULL) {
@@ -158,39 +159,40 @@ void *mm_malloc(size_t size)
         set_header(p, blksize, HDR_ALLOC);
         
         /* Mark empty space as free if there is empty space */
-        void *next = (void *)((char *)p + blksize);
+        void *next = p + blksize;
         if (tmp != 0) {
             set_header(next, (size_t) tmp, HDR_FREE);
             set_footer(next, (size_t) tmp);
         } else {                /* There is no empty space */
-            /* Mark next block as "Previouse alloc" */
+            /* Mark next block as "Previous alloc" */
             *(size_t *)next = *(size_t *)next & ~HDR_PFREE;
         }
 
         DBG_CHECK
         /* Return pointer to payload */
-        return (void *)((char *)p + sizeof(size_t));
+        return (void *)((size_t *)p + 1);
     }
 
     /* There is no appropriate free block on the heap. */
-    p = (void *)((char *)mem_heap_hi() - sizeof(size_t) + 1);
+    p = (void *)mem_heap_hi() - sizeof(size_t) + 1;
     size_t excess = blksize;             /* Requirement of heap */
 
     /* If previous block is free, new block should start at there. */
     if (IS_PFREE(*(size_t *)p)) {
-        size_t psize = MM_SIZE(*((size_t *)p - 1)); /* Previous block's size */
+                                                     /* Previous block's size */
+        const size_t psize = MM_SIZE(*((size_t *)p - 1));
         excess -= psize;
-        p = (void *)((char *)p - psize); /* Our block should start at here. */
+        p -= psize;                       /* New block should start at here. */
     }
     
     if (mem_sbrk(excess) == (void *)-1) {
         return NULL;
     }
-    /* Store block size to header */
+    /* Set header as (blksize)/01 */
     set_header(p, blksize, HDR_ALLOC);
 
     /* Set header of last block as 0/01 */
-    set_header((void *)((char *)p + blksize), 0, HDR_ALLOC);
+    set_header(p + blksize, 0, HDR_ALLOC);
 
     DBG_CHECK
     return (void *)((size_t *)p + 1);    /* return pointer to payload */
@@ -201,7 +203,7 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
-    char *p = (char *)ptr - sizeof(size_t);  /* Pointer to header */
+    void *p = (size_t *)ptr - 1;             /* Pointer to header */
     const size_t hdr = *(size_t *)p;         /* Header element */
     size_t blksize = MM_SIZE(hdr);           /* Blocksize */
     size_t flag = HDR_FREE;                  /* Flag for freeing block */
@@ -213,45 +215,57 @@ void mm_free(void *ptr)
 
     /* Merge with previous block */
     if (IS_PFREE(hdr)) {
-        /* Header element of previous block */
-        tmp = *(size_t *)(p - sizeof(size_t));
+        tmp = *((size_t *)p - 1);        /* Header element of previous block */
 
         /* Set flag and blocksize and header */
         const size_t pbsize = MM_SIZE(tmp); /* Size of previous block */
-        flag = MM_FLAG(tmp);
         blksize += pbsize;
-        p -= pbsize;            /* Mearge two block */
+        p -= pbsize;            /* Merge two blocks */
     }
     
     /* Set this block's marking */
-    set_header((void *)p, blksize, flag);
-    set_footer((void *)p, blksize);
+    set_header(p, blksize, flag);
+    set_footer(p, blksize);
 
     /* Set next block's marking */
-    char *np = p + blksize;                /* Pointer to next block's header */
-    tmp = MM_SIZE(*(size_t *)np);            /* Next block's size */
-    set_header((size_t *)np, tmp, HDR_PFREE | HDR_ALLOC);
+    void *np = p + blksize;                /* Pointer to next block's header */
+    set_header(np, MM_SIZE(*(size_t *)np), HDR_PFREE | HDR_ALLOC);
     DBG_CHECK
 }
 
 /*
- * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
+ * mm_realloc - Change the size of the allocation pointed to by ptr to size, and
+ *       returns ptr. If there is not enough room to enlarge, it creates a new
+ *       allocation, copies the old data, frees the old allocation, and returns
+ *       a pointer to the allocated memory.
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    void *oldptr = ptr;
-    void *newptr;
-    size_t copySize;
+    if (ptr == NULL)
+        return mm_malloc(size);
+
+    size_t blksize = ALIGN(size + sizeof(size_t));
+    void *hp = (size_t *)ptr - 1; /* Pointer to header */
+    const size_t header = *(size_t *)hp;
+    const size_t oldsize = MM_SIZE(header);
     
-    newptr = mm_malloc(size);
-    if (newptr == NULL)
-      return NULL;
-    copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
-    if (size < copySize)
-      copySize = size;
-    memcpy(newptr, oldptr, copySize);
-    mm_free(oldptr);
-    return newptr;
+    if (blksize == oldsize)
+        return ptr;
+    if (blksize < oldsize) {
+        if (blksize == 0)
+            blksize = SIZE_T_SIZE;
+        /* TODO: this can be improved by just adding old - blk to header */
+        set_header(hp, blksize, MM_FLAG(header));
+
+        /* Set next block's header */
+        set_header(hp + blksize, oldsize - blksize, HDR_FREE);
+        set_footer(hp + blksize, oldsize - blksize);
+        return ptr;
+    }
+    void *nptr = mm_malloc(size);
+    memcpy(nptr, ptr, oldsize - sizeof(size_t));
+    mm_free(ptr);
+    return nptr;
 }
 
 /**********************
@@ -267,8 +281,8 @@ void *mm_realloc(void *ptr, size_t size)
  */
 static void *get_target_block(size_t blocksize)
 {
+                                            /* Pointer to each block's header */
     char *p = (char *)mem_heap_lo() + SIZE_T_PADDING;
-                                              /* Pointer to each block's header */
     size_t size = MM_SIZE(*(size_t *)p);   /* Blocksize of current iteration. */
     void *dest = NULL;                        /* Target block. */
     size_t min = -1U;              /* Minimum blocksize for entire iteration */
