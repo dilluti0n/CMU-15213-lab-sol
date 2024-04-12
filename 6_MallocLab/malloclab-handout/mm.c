@@ -242,6 +242,10 @@ void *mm_realloc(void *ptr, size_t size)
 {
     if (ptr == NULL)
         return mm_malloc(size);
+    if (size == 0) {
+        free(ptr);
+        return NULL;
+    }
 
     size_t blksize = ALIGN(size + sizeof(size_t));
     void *hp = (size_t *)ptr - 1; /* Pointer to header */
@@ -251,10 +255,8 @@ void *mm_realloc(void *ptr, size_t size)
     if (blksize == oldsize)
         return ptr;
     if (blksize < oldsize) {
-        if (blksize == 0)
-            blksize = SIZE_T_SIZE;
-        /* TODO: this can be improved by just adding old - blk to header */
-        set_header(hp, blksize, MM_FLAG(header));
+        /* Set blocksize to blk remaining flags */
+        *(size_t *)hp = header - blksize + oldsize;
 
         /* Set next block's header */
         set_header(hp + blksize, oldsize - blksize, HDR_FREE);
