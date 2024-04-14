@@ -56,6 +56,8 @@
 /*
    TODO: Deal with binary-bal.rep (which allocates 448 64, free 448 and then
          allocates 512.) << HOW??
+         Implement heap checker
+         Implement Explicit free list
 */
 
 #include <stdio.h>
@@ -205,9 +207,6 @@ void mm_free(void *ptr)
     size_t flag = HDR_FREE;                  /* Flag for freeing block */
 
     /* Merge with next block */
-    /* TODO: This can be improved by adding one more flag HDR_NFREE. If the
-             alignment rule is double-word (which has 3 zeros for blksize).
-             (less memory access for next-allocated block) */
     size_t tmp = *(size_t *)(p + blksize);   /* Header element of next block */
     if (!IS_ALLOC(tmp))
         blksize += MM_SIZE(tmp);
