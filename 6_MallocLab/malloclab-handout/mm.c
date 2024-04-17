@@ -57,7 +57,8 @@
    TODO: Deal with binary-bal.rep (which allocates 448 64, free 448 and then
          allocates 512.) << HOW??
          Implement heap checker
-         Implement Explicit free list
+         Implement Explicit free list (free() has been done, malloc(), i.e.
+         get_target_block() should be modified using explicit list.
 */
 
 #include <stdio.h>
@@ -70,6 +71,8 @@
 #include "memlib.h"
 
 static int block_size;          /* Size of block founded by get_target_block */
+static void **TOP;              /* Top node of explicit free list */
+static void **BOT;              /* Bottom node for explicit free list */
 
 static void *get_target_block(size_t blocksize);
 inline static int set_header(void *header, size_t blocksize, int flag);
@@ -133,6 +136,11 @@ team_t team = {
  */
 int mm_init(void)
 {
+    /* Initialize global variables */
+    block_size = 0;
+    BOT = (void **)&TOP;
+    TOP = NULL;
+
     /* allocate initial block */
     void *p;
     if ((p = mem_sbrk(SIZE_T_SIZE)) == (void *)-1)
@@ -204,14 +212,12 @@ void mm_free(void *ptr)
     void *p = (size_t *)ptr - 1;             /* Pointer to header */
     const size_t hdr = *(size_t *)p;         /* Header element */
     size_t blksize = MM_SIZE(hdr);           /* Blocksize */
-    size_t flag = HDR_FREE;                  /* Flag for freeing block */
+    void **curr = (void **)ptr;              /* Pointer to explicit list node */
 
-    /* Merge with next block */
-    size_t tmp = *(size_t *)(p + blksize);   /* Header element of next block */
-    if (!IS_ALLOC(tmp))
-        blksize += MM_SIZE(tmp);
+    int isnotmerged = 1;
 
     /* Merge with previous block */
+    size_t tmp;
     if (IS_PFREE(hdr)) {
         tmp = *((size_t *)p - 1);        /* Header element of previous block */
 
@@ -219,15 +225,40 @@ void mm_free(void *ptr)
         const size_t pbsize = MM_SIZE(tmp); /* Size of previous block */
         blksize += pbsize;
         p -= pbsize;            /* Merge two blocks */
+
+        /* We can consider prev block's node as our node */
+        curr = (void **)((void *)curr - pbsize);
+
+        isnotmerged = 0;
+    }
+
+    /* Merge with next block */
+    tmp = *(size_t *)(p + blksize);   /* Header element of next block */
+    if (!IS_ALLOC(tmp)) {
+        blksize += MM_SIZE(tmp);
+                                         /* Pointer to next block's list node */
+        void **next = (void *)p + blksize + sizeof(size_t);
+        *curr = *next;
+        if (isnotmerged)       /* If this block is not merged with prev block, */
+            *next = (void *)curr;
+
+        isnotmerged = 0;
     }
 
     /* Set this block's marking */
-    set_header(p, blksize, flag);
+    set_header(p, blksize, HDR_FREE);
     set_footer(p, blksize);
 
     /* Set next block's marking */
     void *np = p + blksize;                /* Pointer to next block's header */
     set_header(np, MM_SIZE(*(size_t *)np), HDR_PFREE | HDR_ALLOC);
+
+    /* Append curr to BOT of explicit free list */
+    if (isnotmerged) {
+        *curr = NULL;
+        *BOT = curr;            /* Note: BOT is initialized as &TOP */
+        BOT = curr;             /* Mark curr as bottom */
+    }
     DBG_CHECK
 }
 
@@ -237,6 +268,7 @@ void mm_free(void *ptr)
  *       allocation, copies the old data, frees the old allocation, and returns
  *       a pointer to the allocated memory.
  */
+/* TODO: this fails with explit free list implimentation for free() */
 void *mm_realloc(void *ptr, size_t size)
 {
     if (ptr == NULL)
