@@ -116,23 +116,14 @@ team_t team = {
 #define IS_ALLOC(header) ((header)&HDR_ALLOC)
 #define IS_PFREE(header) ((header)&HDR_PFREE)
 
-/* Cleaning for explicit list node connection needed? */
-#define IS_CLEAN_NEEDED(node) ((node)&ND_TIDED)
-
 /* Macros for parse size and flag for header element. */
 #define MM_SIZE(header) ((header)&~HDR_MASK)
 #define MM_FLAG(header) ((header)&HDR_MASK)
-
-#define MM_NEXT(node) ((node)&~ND_MASK) /* pointer to next node */
 
 /* flags for function set_header */
 #define HDR_FREE 0
 #define HDR_ALLOC 1         /* This block is allocated */
 #define HDR_PFREE 2           /* Previous block is free */
-
-/* flag for explicit list nodes */
-#define ND_MASK 1
-#define ND_TIDED 1              /* This node is tided (see doc, explicit list) */
 
 #ifdef DEBUG
 #define DBG_CHECK printf("[%3i]: %s\n",__LINE__, __func__);
@@ -249,12 +240,15 @@ void mm_free(void *ptr)
         void **next = (void *)p + blksize + sizeof(size_t);
         *curr = *next;
         /* If current block has not been merged with prev block, construct
-         * the linked list like (p) -> next -> curr -> (n),mark it with
-         * ND_TIDED, and defer the handling to the macro IS_CLEAN_NEEDED
-         * and function get_target_block.
+         * the linked list like (p) -> next -> curr -> (n) from the origi-
+         * -nal one (p) -> next -> (n), mark the unused next block's header
+         * as -1, and defer the handling to the function get_target_block
+         * since we cannot access to (p) here.
          */
-        if (isnotmerged)
-            *next = (void *)((size_t) curr & ND_TIDED);
+        if (isnotmerged) {
+            *next = (void *)curr;
+            *(size_t *)(p + blksize) = -1U;
+        }
 
         isnotmerged = 0;
     }
@@ -267,7 +261,7 @@ void mm_free(void *ptr)
     void *np = p + blksize;                /* Pointer to next block's header */
     set_header(np, MM_SIZE(*(size_t *)np), HDR_PFREE | HDR_ALLOC);
 
-    /* Append curr to BOT of explicit free list */
+    /* If curr block is not merged, append it to BOT of explicit free list */
     if (isnotmerged) {
         *curr = NULL;
         *BOT = curr;            /* Note: BOT is initialized as &TOP */
