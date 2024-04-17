@@ -116,14 +116,23 @@ team_t team = {
 #define IS_ALLOC(header) ((header)&HDR_ALLOC)
 #define IS_PFREE(header) ((header)&HDR_PFREE)
 
+/* Cleaning for explicit list node connection needed? */
+#define IS_CLEAN_NEEDED(node) ((node)&ND_TIDED)
+
 /* Macros for parse size and flag for header element. */
 #define MM_SIZE(header) ((header)&~HDR_MASK)
 #define MM_FLAG(header) ((header)&HDR_MASK)
+
+#define MM_NEXT(node) ((node)&~ND_MASK) /* pointer to next node */
 
 /* flags for function set_header */
 #define HDR_FREE 0
 #define HDR_ALLOC 1         /* This block is allocated */
 #define HDR_PFREE 2           /* Previous block is free */
+
+/* flag for explicit list nodes */
+#define ND_MASK 1
+#define ND_TIDED 1              /* This node is tided (see doc, explicit list) */
 
 #ifdef DEBUG
 #define DBG_CHECK printf("[%3i]: %s\n",__LINE__, __func__);
@@ -209,10 +218,10 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
+    void **curr = (void **)ptr;              /* Pointer to explicit list node */
     void *p = (size_t *)ptr - 1;             /* Pointer to header */
     const size_t hdr = *(size_t *)p;         /* Header element */
     size_t blksize = MM_SIZE(hdr);           /* Blocksize */
-    void **curr = (void **)ptr;              /* Pointer to explicit list node */
 
     int isnotmerged = 1;
 
@@ -239,8 +248,13 @@ void mm_free(void *ptr)
                                          /* Pointer to next block's list node */
         void **next = (void *)p + blksize + sizeof(size_t);
         *curr = *next;
-        if (isnotmerged)       /* If this block is not merged with prev block, */
-            *next = (void *)curr;
+        /* If current block has not been merged with prev block, construct
+         * the linked list like (p) -> next -> curr -> (n),mark it with
+         * ND_TIDED, and defer the handling to the macro IS_CLEAN_NEEDED
+         * and function get_target_block.
+         */
+        if (isnotmerged)
+            *next = (void *)((size_t) curr & ND_TIDED);
 
         isnotmerged = 0;
     }
