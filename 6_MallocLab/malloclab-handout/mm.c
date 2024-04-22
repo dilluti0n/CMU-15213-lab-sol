@@ -125,11 +125,24 @@ team_t team = {
 #define HDR_ALLOC 1         /* This block is allocated */
 #define HDR_PFREE 2           /* Previous block is free */
 
+#define DEBUG
+
 #ifdef DEBUG
-#define DBG_CHECK printf("[%3i]: %s\n",__LINE__, __func__);
+static void dbg_heap_check();
+static void dbg_list_check();
+static int dbg_is_on_list(void **ptr);
+static void *dbg_next(void **ptr);
+static void dbg_print_heap();
+static void dbg_print_list();
+
+#define DBG_CHECK \
+    printf("[%3i]: %s\n",__LINE__, __func__);\
+    dbg_heap_check();
+
 #else
 #define DBG_CHECK
 #endif
+
 
 /*
  * mm_init - initialize the malloc package.
@@ -384,7 +397,87 @@ inline static int set_footer(void *header, size_t blocksize)
 /*************************
  *    Debug functions    *
  *************************/
+#ifdef DEBUG
 
+static void dbg_heap_check()
+{
+    void *p = mem_heap_lo() + SIZE_T_PADDING;
+    size_t size = MM_SIZE(*(size_t *)p);
+    void **node = TOP;
+
+    while (size != 0) {
+        if (!IS_ALLOC(*(size_t *)p)) {
+            if (!dbg_is_on_list((void **)p + 1)) {
+                fprintf(stdout, "[%p]: %lu; is not on list.\n",
+                        p, MM_SIZE(*(size_t *)p));
+                dbg_print_list();
+                dbg_print_heap();
+                exit(-1);
+            }
+            node = (void **)dbg_next(node);
+        }
+        p += size;
+        size = MM_SIZE(*(size_t *)p);
+    }
+}
+
+static int dbg_is_on_list(void **ptr)
+{
+    void **node = TOP;
+    while (node != NULL) {
+        if (ptr == node)
+            return 1;
+        node = (void **)dbg_next(node);
+    }
+    return 0;
+}
+
+static void *dbg_next(void **ptr)
+{
+    if (ptr == NULL)
+        return (void *)-1;
+
+    void *next = *ptr;
+    if (next == NULL)
+        return NULL;
+    if (*((size_t *)next - 1) == -1)
+        return *(void **)next;
+    return next;
+}
+
+static void dbg_print_heap() {
+    void *p = mem_heap_lo() + SIZE_T_PADDING;
+    size_t size = MM_SIZE(*(size_t *)p);
+
+    printf("---HEAP---\n");
+    while (size != 0) {
+        size_t header = *(size_t *)p;
+        printf("[%p]: %4lu; (%lu,%lu)\n", p, size, IS_PFREE(header),
+               IS_ALLOC(header));
+        p += size;
+        size = MM_SIZE(*(size_t *)p);
+    }
+
+}
+
+static void dbg_print_list()
+{
+    printf("---Free list---\n");
+    void **node = TOP;
+    printf("TOP = ");
+    while (node != NULL) {
+        printf("[%p] -> ", node);
+        if (node == dbg_next(node)) {
+            printf("<- \n");
+            exit(1);
+        }
+        node = dbg_next(node);
+    }
+    if (node == NULL)
+        printf("NULL\n");
+}
+
+#endif
 /*************************
  * End of Debug function *
  *************************/
