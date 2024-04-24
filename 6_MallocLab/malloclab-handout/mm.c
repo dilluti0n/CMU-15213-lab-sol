@@ -1,4 +1,4 @@
-/*
+/**
  * mm.c - memory allocation module using implicit free list.
  *
  * Slow, but good memory efficiancy.
@@ -128,16 +128,19 @@ team_t team = {
 #define DEBUG
 
 #ifdef DEBUG
+
 static void dbg_heap_check();
 static void dbg_list_check();
 static int dbg_is_on_list(void **ptr);
 static void *dbg_next(void **ptr);
-static void dbg_print_heap();
+static void dbg_print_heap(int verbose);
 static void dbg_print_list();
 
 #define DBG_CHECK \
-    printf("[%3i]: %s\n",__LINE__, __func__);\
-    dbg_heap_check();
+    printf("[%3i]: %s returns\n",__LINE__, __func__);\
+    dbg_print_heap(1);                           \
+    dbg_print_list();\
+    dbg_heap_check();\
 
 #else
 #define DBG_CHECK
@@ -408,10 +411,10 @@ static void dbg_heap_check()
     while (size != 0) {
         if (!IS_ALLOC(*(size_t *)p)) {
             if (!dbg_is_on_list((void **)p + 1)) {
-                fprintf(stdout, "[%p]: %lu; is not on list.\n",
-                        p, MM_SIZE(*(size_t *)p));
+                fprintf(stdout, "[%p]: (%p) %lu; is not on list.\n",
+                        p, p + sizeof(size_t), MM_SIZE(*(size_t *)p));
                 dbg_print_list();
-                dbg_print_heap();
+                dbg_print_heap(0);
                 exit(-1);
             }
             node = (void **)dbg_next(node);
@@ -445,15 +448,17 @@ static void *dbg_next(void **ptr)
     return next;
 }
 
-static void dbg_print_heap() {
+static void dbg_print_heap(int verbose) {
     void *p = mem_heap_lo() + SIZE_T_PADDING;
     size_t size = MM_SIZE(*(size_t *)p);
 
     printf("---HEAP---\n");
     while (size != 0) {
         size_t header = *(size_t *)p;
-        printf("[%p]: %4lu; (%lu,%lu)\n", p, size, IS_PFREE(header),
-               IS_ALLOC(header));
+        if (verbose || !IS_ALLOC(header))
+            printf("[%p]: (%p) %4lu; (%lu,%lu)\n",
+                   p, p + sizeof(size_t), size, IS_PFREE(header),
+                   IS_ALLOC(header));
         p += size;
         size = MM_SIZE(*(size_t *)p);
     }
@@ -466,7 +471,7 @@ static void dbg_print_list()
     void **node = TOP;
     printf("TOP = ");
     while (node != NULL) {
-        printf("[%p] -> ", node);
+        printf("(%p) -> ", node);
         if (node == dbg_next(node)) {
             printf("<- \n");
             exit(1);
