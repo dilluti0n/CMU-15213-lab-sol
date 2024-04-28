@@ -1,7 +1,7 @@
 /**
- * mm.c - memory allocation module using implicit free list.
+ * mm.c - memory allocation module using explicit free list.
  *
- * Slow, but good memory efficiancy.
+ * Usable but needs improvement for certain cases.
  * ----
  * NOTE: This code is for 32-bit system; Compile it with -m32 flag.
  * ----ALIGNMENT----
@@ -34,7 +34,8 @@
  * As we marked (B') as 0/1, each subsequent increase in the heap size follows
  * the same pattern, recursively aligning each block by marking the header
  * and the last block.
- * ----FLAGS----
+ *
+ * ----FLAGS FOR HEADER----
  * header element - `size_t` value that loaded on the header of block.
  *      Each header elements are represented by (size)/(pfree)(alloc).
  * (size)  - Size of block.
@@ -44,6 +45,40 @@
  *    free(0). Macro `HDR_ALLOC` is flag for alloc.
  * The precise useage of each macros `HDR_FREE`, `HDR_PFREE`, `HDR_ALLOC`
  * is defined on the comment of function `set_header`.
+ *
+ * ----EXPLICIT FREE LIST----
+ * The global variable TOP contains pointer to head of list node. Each list
+ * nodes for each blocks are alligned on next eight bytes of header. So th-
+ * -at, pointer to next node is given by *(void **)curr, when curr is
+ * pointer to current node. By this rule, if blocksize is 8, storing
+ * that block to list would override the footer. This can be resolv-
+ * -ed by using flag FTR_VALID, which is described on next section.
+ *
+ * mm_free merge with prev and next block on heap, if either one is free.
+ * However this is not as simple as implicit list because we do not know
+ * (a)where the prev or next block is located on the free list, and
+ * (b)value of pointer to previouse node. So that we should handle
+ * the four cases diffrently in here.
+ *
+ * 1) prev alloc, next free
+ * Modify list (p) -> next -> (n) to (p) -> next -> curr -> (n), and mark
+ * header of prev as -1. This tided state would be resolved when traver-
+ * -sing list on get_target_block. If size of next is less then 8,
+ * pointer to curr is stored on the last 8 bytes of block that node curr
+ * is placed, so setting footer for this block overrides it. Thus if
+ * blocksize is 8, we will traverse list and replace next to
+ * curr instead.
+ *
+ * 2) prev free, next free
+ * Delete the next node on the list. This will consume extra resource since
+ * node_replace_s traverses entire list and replace the node.
+ *
+ * 3) prev free, next alloc
+ * In this case, there is nothing to do.
+ *
+ * 4) prev alloc, next alloc
+ * Append current block to the TOP of list by calling node_top.
+ *
  * ----FOOTER----
  * Note that on this structure, every free block has `footer`, exact duplicate
  * of its header, and located on the last `size_t` section of the block.
@@ -51,14 +86,19 @@
  *
  * The footer is used when (pfree) flag is turned on to next block, which is
  * crucial for allocater, to indicate previous block's size.
+ *
+ * Flag FTR_VALID is used for footer. Its defined as '4'. Since we using double
+ * word alignment, every three low bits of each elements for list nodes are
+ * zero. So when footer is overrided by list node, this flag will be over-
+ * rided. And we place list nodes as next to the header, so this case is
+ * occured only if the block's size is 8 byte.
  */
 
 /*
    TODO: Deal with binary-bal.rep (which allocates 448 64, free 448 and then
          allocates 512.) << HOW??
-         Implement heap checker
-         Implement Explicit free list (free() has been done, malloc(), i.e.
-         get_target_block() should be modified using explicit list.
+         Implement segregated free list.
+         Increase readability and modurarility by defining some macros.
 */
 
 #include <stdio.h>
@@ -70,20 +110,20 @@
 #include "mm.h"
 #include "memlib.h"
 
-static int block_size;          /* Size of block founded by get_target_block */
+static int    block_size;       /* Size of block founded by get_target_block */
 static void **prev_node;        /* Pointer to previous free block's node */
 static void **TOP;              /* Top node of explicit free list */
 
-static void *get_target_block(size_t blocksize);
-inline static int set_header(void *header, size_t blocksize, int flag);
-inline static int set_footer(void *header, size_t blocksize);
+static void         *get_target_block(size_t blocksize);
+inline static int    set_header(void *header, size_t blocksize, int flag);
+inline static int    set_footer(void *header, size_t blocksize);
 inline static void **node_search_prev(void **curr);
-inline static void node_delete(void **prev, void **curr);
-inline static void node_delete_s(void **curr);
-inline static void node_replace(void **prev, void **src, void **dst);
-inline static void node_replace_s(void **src, void **dst);
-inline static void node_top(void **node);
-inline static void node_insert(void **prev, void **node);
+inline static void   node_delete(void **prev, void **curr);
+inline static void   node_delete_s(void **curr);
+inline static void   node_replace(void **prev, void **src, void **dst);
+inline static void   node_replace_s(void **src, void **dst);
+inline static void   node_top(void **node);
+inline static void   node_insert(void **prev, void **node);
 
 /*********************************************************
  * NOTE TO STUDENTS: Before you do anything else, please
