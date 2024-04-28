@@ -4,7 +4,7 @@
  * Slow, but good memory efficiancy.
  * ----
  * NOTE: This code is for 32-bit system; Compile it with -m32 flag.
- * ----(ALIGNMENT)----
+ * ----ALIGNMENT----
  * mm_init() sets heap like this:
  *
  * 0                      4                      8
@@ -154,7 +154,6 @@ int mm_init(void)
 {
     /* Initialize global variables */
     block_size = 0;
-    BOT = (void **)&TOP;
     TOP = NULL;
 
     /* allocate initial block */
@@ -411,7 +410,7 @@ static void dbg_heap_check()
     while (size != 0) {
         if (!IS_ALLOC(*(size_t *)p)) {
             if (!dbg_is_on_list((void **)p + 1)) {
-                fprintf(stdout, "[%p]: (%p) %lu; is not on list.\n",
+                fprintf(stdout, "[%p]: (%p) %u; is not on list.\n",
                         p, p + sizeof(size_t), MM_SIZE(*(size_t *)p));
                 dbg_print_list();
                 dbg_print_heap(0);
@@ -422,6 +421,11 @@ static void dbg_heap_check()
         p += size;
         size = MM_SIZE(*(size_t *)p);
     }
+}
+
+static void dbg_list_check()
+{
+    return;
 }
 
 static int dbg_is_on_list(void **ptr)
@@ -456,7 +460,7 @@ static void dbg_print_heap(int verbose) {
     while (size != 0) {
         size_t header = *(size_t *)p;
         if (verbose || !IS_ALLOC(header))
-            printf("[%p]: (%p) %4lu; (%lu,%lu)\n",
+            printf("[%p]: (%p) %4u; (%u,%u)\n",
                    p, p + sizeof(size_t), size, IS_PFREE(header),
                    IS_ALLOC(header));
         p += size;
