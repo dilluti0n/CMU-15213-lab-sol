@@ -57,7 +57,7 @@
  * mm_free merge with prev and next block on heap, if either one is free.
  * However this is not as simple as implicit list because we do not know
  * (a)where the prev or next block is located on the free list, and
- * (b)value of pointer to previouse node. So that we should handle
+ * (b)value of pointer to previous node. So that we should handle
  * the four cases diffrently in here.
  *
  * 1) prev alloc, next free
