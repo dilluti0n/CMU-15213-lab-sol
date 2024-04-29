@@ -98,7 +98,6 @@
    TODO: Deal with binary-bal.rep (which allocates 448 64, free 448 and then
          allocates 512.) << HOW??
          Implement segregated free list.
-         Increase readability and modurarility by defining some macros.
 */
 
 #include <stdio.h>
@@ -114,6 +113,8 @@ static int    block_size;       /* Size of block founded by get_target_block */
 static void **prev_node;        /* Pointer to previous free block's node */
 static void **TOP;              /* Top node of explicit free list */
 
+static void         *malloc_existing_block(size_t blocksize);
+static void         *malloc_new_block(size_t blocksize);
 static void         *get_target_block(size_t blocksize);
 inline static void   set_header(void *header, size_t blocksize, int flag);
 inline static void   set_footer(void *header, size_t blocksize);
@@ -227,55 +228,12 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
-    void *p;
-                                               /* Block size to malloc */
-    const size_t blksize = ALIGN(size + WORD);
+    void         *p;
+    const size_t  blksize = ALIGN(size + WORD);
 
-    /* Traverse the free list. */
-    if ((p = get_target_block(blksize)) != NULL) {
-        const size_t surplus = block_size - blksize; /* Size of remainder space */
-
-        /* Mark target block as use */
-        set_header(p, blksize, HDR_ALLOC);
-
-        /* Mark empty space as free if there is empty space */
-        void *next = p + blksize;
-        if (surplus != 0) {
-            set_header(next, (size_t)surplus, HDR_FREE);
-            set_footer(next, (size_t)surplus);
-            node_replace(prev_node, (void **)p + 1, (void **)next + 1);
-        } else {                /* There is no empty space */
-            /* Mark next block as "Previous alloc" */
-            *(size_t *)next = *(size_t *)next & ~HDR_PFREE;
-            node_delete(prev_node, (void **)p + 1);
-        }
-
-        DBG_CHECK
-        return PLD_PTR(p);
-    }
-
-    /* There is no appropriate free block on the heap. */
-    p = LAST_BLK_HDR;
-    size_t excess = blksize;             /* Requirement of heap */
-
-    /* If previous block is free, new block should start at there. */
-    if (IS_PFREE(*(size_t *)p)) {
-                                                     /* Previous block's size */
-        const size_t psize = MM_SIZE(FTR_ELE(p));
-        excess -= psize;
-        p -= psize;                       /* New block should start at here. */
-        node_delete_s((void **)PLD_PTR(p));
-    }
-
-    /* Request more heap !! */
-    if (mem_sbrk(excess) == (void *)-1) {
-        return NULL;
-    }
-    set_header(p, blksize, HDR_ALLOC);    /* Set header as (blksize)/01 */
-    set_header(p + blksize, 0, HDR_ALLOC); /* Set header of last block as 0/01 */
-
-    DBG_CHECK
-    return (void *)((size_t *)p + 1);    /* return pointer to payload */
+    if ((p = malloc_existing_block(blksize)) != NULL)
+        return p;
+    return malloc_new_block(blksize);
 }
 
 /*
@@ -404,6 +362,69 @@ void *mm_realloc(void *ptr, size_t size)
 /**********************
  * My helper routines *
  **********************/
+/*
+ * malloc_existing_block - Try to allocate requested blocksize block from
+ *     existing block by calling get_target_block. If there is appropria-
+ *     te block, allocate it and return pointer to payload. If not,
+ *     return NULL.
+ */
+static void *malloc_existing_block(size_t blocksize)
+{
+    void *p;
+    /* Traverse the free list. */
+    if ((p = get_target_block(blocksize)) != NULL) {
+        const size_t surplus = block_size - blocksize; /* Size of remainder space */
+
+        /* Mark target block as use */
+        set_header(p, blocksize, HDR_ALLOC);
+
+        /* Mark empty space as free if there is empty space */
+        void *next = p + blocksize;
+        if (surplus != 0) {
+            set_header(next, (size_t)surplus, HDR_FREE);
+            set_footer(next, (size_t)surplus);
+            node_replace(prev_node, (void **)p + 1, (void **)next + 1);
+        } else {                /* There is no empty space */
+            /* Mark next block as "Previous alloc" */
+            *(size_t *)next = *(size_t *)next & ~HDR_PFREE;
+            node_delete(prev_node, (void **)p + 1);
+        }
+        return PLD_PTR(p);
+    }
+    return NULL;
+}
+
+/*
+ * malloc_new_block - Allocate new block by calling mm_sbrk. If there is free
+ *        space trailing area of heap, use it that area first and expand heap.
+ *        It returns pointer to payload of new block or NULL, when mm_sbrk
+ *        fails.
+ */
+static void *malloc_new_block(size_t blocksize)
+{
+    /* There is no appropriate free block on the heap. */
+    void *p = LAST_BLK_HDR;
+    size_t excess = blocksize;             /* Requirement of heap */
+
+    /* If previous block is free, new block should start at there. */
+    if (IS_PFREE(*(size_t *)p)) {
+                                                     /* Previous block's size */
+        const size_t pbsize = MM_SIZE(FTR_ELE(p));
+        excess -= pbsize;
+        p -= pbsize;                       /* New block should start at here. */
+        node_delete_s((void **)PLD_PTR(p));
+    }
+
+    /* Request more heap !! */
+    if (mem_sbrk(excess) == (void *)-1) {
+        return NULL;
+    }
+    set_header(p, blocksize, HDR_ALLOC);    /* Set header as (blksize)/01 */
+    set_header(p + blocksize, 0, HDR_ALLOC); /* Set header of last block as 0/01 */
+
+    return PLD_PTR(p);    /* return pointer to payload */
+}
+
 
 /*
  * get_target_block - return the pointer to head of appropriate free block while
