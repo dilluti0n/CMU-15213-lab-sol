@@ -265,33 +265,22 @@ void mm_free(void *ptr)
     void   *nh    = p + blksize; /* Pointer to next block's header */
     size_t  nhele = HDR_ELE(nh); /* Header element of next block */
     if (!IS_ALLOC(nhele)) {
-        /* Pointer to next block's list node */
-        void **next = (void **)PLD_PTR(nh);
-        if (isnotmerged) {
-            /**
-             * prev alloc, next free
-             * Construct the list like (p) -> next -> curr -> (n) from the origi-
-             * -nal one (p) -> next -> (n), mark the unused next block's header
-             * as -1, and defer the handling to the function get_target_block
-             * since we cannot access to (p) here.
-             */
+        void **next = (void **)PLD_PTR(nh); /* Pointer to next block's node */
+        if (isnotmerged) { /* prev alloc, next free */
             if (MM_SIZE(nhele) > 8) {
+                /* Defer process to get_target_block. See header comment. */
                 node_insert(next, curr);
                 HDR_ELE(nh) = -1U;
             } else {
                 /**
-                 * TODO: improve this to not search entire list
+                 * TODO: improve this to not search entire list.
                  *
-                 * If size of the next block is less then 8, footer
-                 * of curr block would overwrite node "next"
+                 * If size of the next block is less then 8, footer of curr
+                 * overwrites node "next".
                  */
                 node_replace_s(next, curr);
             }
-        } else {
-            /**
-             * prev free, next free
-             * Just deleting next block on free list would be fine.
-             */
+        } else { /* prev free, next free */
             node_delete_s(next);
         }
         blksize += MM_SIZE(nhele);
@@ -307,18 +296,9 @@ void mm_free(void *ptr)
     void *const np = p + blksize;           /* Pointer to next block's header */
     set_header(np, MM_SIZE(HDR_ELE(np)), HDR_PFREE | HDR_ALLOC);
 
-    /**
-     * prev alloc, next alloc
-     * Append current block to the TOP of free list
-     */
-    if (isnotmerged)
+    if (isnotmerged) /* prev alloc, next alloc */
         node_top(curr);
-
-    /**
-     * prev free, next alloc
-     * Do nothing.
-     */
-
+    /* prev free, next alloc; Do nothing.*/
     DBG_CHECK
 }
 
@@ -407,7 +387,7 @@ static void *malloc_new_block(size_t blocksize)
     size_t excess = blocksize;             /* Requirement of heap */
 
     /* If previous block is free, new block should start at there. */
-    if (IS_PFREE(*(size_t *)p)) {
+    if (IS_PFREE(HDR_ELE(p))) {
                                                      /* Previous block's size */
         const size_t pbsize = MM_SIZE(FTR_ELE(p));
         excess -= pbsize;
@@ -519,6 +499,13 @@ inline static void node_insert(void **prev, void **node)
     *prev = node;
 }
 
+/*
+ * node_find_prev - Find previouse node of curr by traverse entire list. This
+ *          function assume that node curr is in the list. If not, it whould
+ *          not stop...
+ *          If macro DEBUG is defined, in the caase that curr is not included
+ *          inside of list, the program would be exited with code 1.
+ */
 inline static void **node_find_prev(void **curr)
 {
     void **p = TOP, **prev = (void **)&TOP;
