@@ -8,8 +8,8 @@
  * mm_init() sets heap like this:
  *
  * 0                      4                      8
- * |<----------------SIZE_T_SIZE---------------->|
- * |<---SIZE_T_PADDING--->|<---sizeof(size_t)--->|
+ * |<-----------------INIT_SIZE----------------->|
+ * |<------INIT_PADD----->|<---sizeof(size_t)--->|
  * |(This area is padding)|(This area is header) |
  * |----------------------|----------0/1---------|
  * :"0/1" indicates that the block is size 0, and is alloacted(1)
@@ -20,7 +20,7 @@
  * refers to the required payload size. We need to allocate
  * more space than that and serve to caller.
  *
- * |<--SIZE_T_SIZE-->|<-----ALIGN(size + sizeof(size_t))----->|
+ * |<---INIT_SIZE--->|<-----ALIGN(size + sizeof(size_t))----->|
  * |padding|---0/1---|<-------`size`------->|padding|---?/?---|
  * |**(A)**|***(B)***|**********(C)*********|**(A')*|***(B')**|
  * |///////|----------------(block)-----------------|--(tail)-|
@@ -71,7 +71,7 @@
  *
  * 2) prev free, next free
  * Delete the next node on the list. This will consume extra resource since
- * node_replace_s traverses entire list and replace the node.
+ * node_delete_s traverses entire list and delete the node.
  *
  * 3) prev free, next alloc
  * In this case, there is nothing to do.
@@ -115,9 +115,9 @@ static void **prev_node;        /* Pointer to previous free block's node */
 static void **TOP;              /* Top node of explicit free list */
 
 static void         *get_target_block(size_t blocksize);
-inline static int    set_header(void *header, size_t blocksize, int flag);
-inline static int    set_footer(void *header, size_t blocksize);
-inline static void **node_search_prev(void **curr);
+inline static void   set_header(void *header, size_t blocksize, int flag);
+inline static void   set_footer(void *header, size_t blocksize);
+inline static void **node_find_prev(void **curr);
 inline static void   node_delete(void **prev, void **curr);
 inline static void   node_delete_s(void **curr);
 inline static void   node_replace(void **prev, void **src, void **dst);
@@ -140,59 +140,63 @@ team_t team = {
     ""
 };
 
+/* 32-bit */
+#define WORD 4
+
 /* Double word alignment */
-#define DWRD_ALIGN
+#define ALIGNMENT (WORD*2)
+#define HDR_MASK  7
 
-/* Alignment */
-#ifdef SWRD_ALIGN
-#define ALIGNMENT 4
-#define HDR_MASK 0x3
-#endif
+/* Round up to the nearest multiple of ALIGNMENT */
+#define ALIGN(size) (((size) + ALIGNMENT - 1) & ~HDR_MASK)
 
-#ifdef DWRD_ALIGN
-#define ALIGNMENT 8
-#define HDR_MASK 0x7
-#endif
+/* Initialize heap with this size and padding */
+#define INIT_SIZE ALIGN(WORD)
+#define INIT_PADD (INIT_SIZE-WORD)
 
-/* rounds up to the nearest multiple of ALIGNMENT */
-#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
+/* Pointer to first and last block's header */
+#define FRST_BLK_HDR ((void *)mem_heap_lo() + INIT_PADD)
+#define LAST_BLK_HDR ((void *)mem_heap_hi() - WORD + 1)
 
-#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
-#define SIZE_T_PADDING SIZE_T_SIZE - sizeof(size_t)
+/* Changing pointers block-internally. pld: payload */
+#define FTR_PTR(ptr_to_next_hdr) ((void *)(ptr_to_next_hdr) - WORD)
+#define FTR_ELE(ptr_to_next_hdr) (*(size_t *)FTR_PTR(ptr_to_next_hdr))
+#define PLD_PTR(ptr_to_hdr)      ((void *)(ptr_to_hdr) + WORD)
+#define HDR_PTR(ptr_to_pld)      ((void *)(ptr_to_pld) - WORD)
+#define HDR_ELE(ptr_to_hdr)      (*(size_t *)ptr_to_hdr)
 
-#define IS_ALLOC(header) ((header)&HDR_ALLOC)
-#define IS_PFREE(header) ((header)&HDR_PFREE)
-#define IS_VALID_FTR(footer) ((footer)&FTR_VALID)
+/* Determine header or footer metadatas */
+#define IS_ALLOC(hdr_ele) ((hdr_ele) & HDR_ALLOC)
+#define IS_PFREE(hdr_ele) ((hdr_ele) & HDR_PFREE)
+#define IS_VALID(ftr_ele) ((ftr_ele) & FTR_VALID)
 
 /* Macros for parse size and flag for header element. */
-#define MM_SIZE(header) ((header)&~HDR_MASK)
-#define MM_FLAG(header) ((header)&HDR_MASK)
+#define MM_SIZE(header) ((header) & ~HDR_MASK)
+#define MM_FLAG(header) ((header) & HDR_MASK)
 
 /* flags for function set_header */
-#define HDR_FREE 0
-#define HDR_ALLOC 1         /* This block is allocated */
-#define HDR_PFREE 2         /* Previous block is free */
+#define HDR_FREE  0             /* This block is free */
+#define HDR_ALLOC 1             /* This block is allocated */
+#define HDR_PFREE 2             /* Previous block is free */
+#define FTR_VALID 4             /* Valid footer */
 
-#define FTR_VALID 4
-
-//#define DEBUG
+/* #define DEBUG */
 
 #ifdef DEBUG
-
-static void dbg_heap_check();
-static void dbg_list_check();
-static int dbg_is_on_list(void **ptr);
+static void  dbg_heap_check();
+static void  dbg_list_check();
+static int   dbg_is_on_list(void **ptr);
 static void *dbg_next(void **ptr);
-static void dbg_print_heap(int verbose);
-static void dbg_print_list();
+static void  dbg_print_heap(int verbose);
+static void  dbg_print_list();
 
 #define DBG_CHECK \
-    printf("[%3i]: %s returns\n",__LINE__, __func__);\
+    printf("\n------- [%3i]: %s returns -------\n",__LINE__, __func__);\
     dbg_print_heap(0);\
     dbg_print_list();\
     dbg_heap_check();\
-    dbg_list_check();
-
+    dbg_list_check();\
+    printf("-----------------------------------\n");
 #else
 #define DBG_CHECK
 #endif
@@ -209,9 +213,9 @@ int mm_init(void)
 
     /* allocate initial block */
     void *p;
-    if ((p = mem_sbrk(SIZE_T_SIZE)) == (void *)-1)
+    if ((p = mem_sbrk(INIT_SIZE)) == (void *)-1)
         return -1;
-    p += SIZE_T_PADDING; /* Set p as pointer to header */
+    p += INIT_PADD; /* Set p as pointer to header */
     set_header(p, 0, HDR_ALLOC);
     DBG_CHECK
     return 0;
@@ -225,20 +229,20 @@ void *mm_malloc(size_t size)
 {
     void *p;
                                                /* Block size to malloc */
-    const size_t blksize = ALIGN(size + sizeof(size_t));
+    const size_t blksize = ALIGN(size + WORD);
 
     /* Traverse the free list. */
     if ((p = get_target_block(blksize)) != NULL) {
-        const size_t tmp = block_size - blksize;       /* Size of empty space */
+        const size_t surplus = block_size - blksize; /* Size of remainder space */
 
         /* Mark target block as use */
         set_header(p, blksize, HDR_ALLOC);
 
         /* Mark empty space as free if there is empty space */
         void *next = p + blksize;
-        if (tmp != 0) {
-            set_header(next, (size_t)tmp, HDR_FREE);
-            set_footer(next, (size_t)tmp);
+        if (surplus != 0) {
+            set_header(next, (size_t)surplus, HDR_FREE);
+            set_footer(next, (size_t)surplus);
             node_replace(prev_node, (void **)p + 1, (void **)next + 1);
         } else {                /* There is no empty space */
             /* Mark next block as "Previous alloc" */
@@ -247,20 +251,20 @@ void *mm_malloc(size_t size)
         }
 
         DBG_CHECK
-        return (void *)((size_t *)p + 1);        /* Return pointer to payload */
+        return PLD_PTR(p);
     }
 
     /* There is no appropriate free block on the heap. */
-    p = (void *)mem_heap_hi() - sizeof(size_t) + 1;
+    p = LAST_BLK_HDR;
     size_t excess = blksize;             /* Requirement of heap */
 
     /* If previous block is free, new block should start at there. */
     if (IS_PFREE(*(size_t *)p)) {
                                                      /* Previous block's size */
-        const size_t psize = MM_SIZE(*((size_t *)p - 1));
+        const size_t psize = MM_SIZE(FTR_ELE(p));
         excess -= psize;
         p -= psize;                       /* New block should start at here. */
-        node_delete_s((void **)(p + sizeof(size_t)));
+        node_delete_s((void **)PLD_PTR(p));
     }
 
     /* Request more heap !! */
@@ -279,34 +283,32 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
-    void **curr = (void **)ptr;              /* Pointer to explicit list node */
-    void *p = (size_t *)ptr - 1;             /* Pointer to header */
-    const size_t hdr = *(size_t *)p;         /* Header element */
-    size_t blksize = MM_SIZE(hdr);           /* Blocksize */
-
-    int isnotmerged = 1;
+    void         **curr        = (void **)ptr; /* Pointer to explicit list node */
+    void          *p           = HDR_PTR(ptr); /* Pointer to header */
+    const size_t   hdr         = HDR_ELE(p);   /* Header element */
+    size_t         blksize     = MM_SIZE(hdr); /* Blocksize */
+    int            isnotmerged = 1;
 
     /* Merge with previous block */
     if (IS_PFREE(hdr)) {
-        size_t tmp;
-        tmp = *((size_t *)p - 1); /* Header element of previous block */
-        if (!IS_VALID_FTR(tmp))
-            /* issue; Only 8-byte block's footer is overrided by list node. */
-            tmp = *((size_t *)p - 2);
+        size_t ftr = FTR_ELE(p); /* Header element of previous block */
+        if (!IS_VALID(ftr))
+            /* Only 8-byte block's footer is overrided by list node. */
+            ftr = *((size_t *)p - 2);
 
         /* Set flag and blocksize and header */
-        const size_t pbsize = MM_SIZE(tmp); /* Size of previous block */
+        const size_t pbsize = MM_SIZE(ftr); /* Size of previous block */
         blksize += pbsize;
         p -= pbsize;            /* Merge two blocks */
         isnotmerged = 0;
     }
 
     /* Merge with next block */
-    void *nh = p + blksize;                  /* Pointer to next block's header */
-    size_t nhele = *(size_t *)nh;            /* Header element of next block */
+    void   *nh    = p + blksize; /* Pointer to next block's header */
+    size_t  nhele = HDR_ELE(nh); /* Header element of next block */
     if (!IS_ALLOC(nhele)) {
         /* Pointer to next block's list node */
-        void **next = nh + sizeof(size_t);
+        void **next = (void **)PLD_PTR(nh);
         if (isnotmerged) {
             /**
              * prev alloc, next free
@@ -317,10 +319,14 @@ void mm_free(void *ptr)
              */
             if (MM_SIZE(nhele) > 8) {
                 node_insert(next, curr);
-                *(size_t *)nh = -1U;
+                HDR_ELE(nh) = -1U;
             } else {
-                /* TODO: improve this to not search entire list */
-                /* This case, footer of curr block will overlap node "next" */
+                /**
+                 * TODO: improve this to not search entire list
+                 *
+                 * If size of the next block is less then 8, footer
+                 * of curr block would overwrite node "next"
+                 */
                 node_replace_s(next, curr);
             }
         } else {
@@ -335,22 +341,28 @@ void mm_free(void *ptr)
         isnotmerged = 0;
     }
 
-    /* Set this block's marking */
+    /* Set current block's header and footer */
     set_header(p, blksize, HDR_FREE);
     set_footer(p, blksize);
 
-    /* Set next block's marking */
-    void *np = p + blksize;                /* Pointer to next block's header */
-    set_header(np, MM_SIZE(*(size_t *)np), HDR_PFREE | HDR_ALLOC);
+    /* Set non-merged next block's header */
+    void *const np = p + blksize;           /* Pointer to next block's header */
+    set_header(np, MM_SIZE(HDR_ELE(np)), HDR_PFREE | HDR_ALLOC);
 
-    /* If curr block is not merged, append it to TOP of free list */
-    if (isnotmerged) /* prev alloc, next alloc */
+    /**
+     * prev alloc, next alloc
+     * Append current block to the TOP of free list
+     */
+    if (isnotmerged)
         node_top(curr);
 
-    /* prev free, next alloc :Do nothing. */
+    /**
+     * prev free, next alloc
+     * Do nothing.
+     */
 
     DBG_CHECK
-    }
+}
 
 /*
  * mm_realloc - Change the size of the allocation pointed to by ptr to size, and
@@ -358,26 +370,25 @@ void mm_free(void *ptr)
  *       allocation, copies the old data, frees the old allocation, and returns
  *       a pointer to the allocated memory.
  */
-/* TODO: this fails with explit free list implimentation for free() */
 void *mm_realloc(void *ptr, size_t size)
 {
     if (ptr == NULL)
         return mm_malloc(size);
     if (size == 0) {
-        free(ptr);
+        mm_free(ptr);
         return NULL;
     }
 
-    size_t blksize = ALIGN(size + sizeof(size_t));
-    void *hp = (size_t *)ptr - 1; /* Pointer to header */
-    const size_t header = *(size_t *)hp;
-    const size_t oldsize = MM_SIZE(header);
+    size_t        blksize = ALIGN(size + WORD);
+    void         *hp      = HDR_PTR(ptr); /* Pointer to header */
+    const size_t  hele    = HDR_ELE(hp);
+    const size_t  oldsize = MM_SIZE(hele);
 
     if (blksize == oldsize)
         return ptr;
     if (blksize < oldsize) {
         /* Set blocksize to blk remaining flags */
-        *(size_t *)hp = header - blksize + oldsize;
+        HDR_ELE(hp) = hele - blksize + oldsize;
 
         /* Set next block's header */
         set_header(hp + blksize, oldsize - blksize, HDR_FREE);
@@ -385,7 +396,7 @@ void *mm_realloc(void *ptr, size_t size)
         return ptr;
     }
     void *nptr = mm_malloc(size);
-    memcpy(nptr, ptr, oldsize - sizeof(size_t));
+    memcpy(nptr, ptr, oldsize - WORD);
     mm_free(ptr);
     return nptr;
 }
@@ -403,40 +414,40 @@ void *mm_realloc(void *ptr, size_t size)
  */
 static void *get_target_block(size_t blocksize)
 {
-    void **p = TOP;                 /* Pointer to each free block's node */
-    size_t size;                    /* Blocksize of each iteration. */
-    void *dest = NULL;              /* Pointer to header of target block */
-    size_t min = -1U;               /* Minimum blocksize for entire iteration */
-    void **prev = (void **)&TOP;    /* Previous node for current ineration */
+    size_t   size;            /* Blocksize of each iteration. */
+    size_t   min  = -1U;      /* Minimum blocksize for entire iteration */
+    void    *dest = NULL;     /* Pointer to header of target block */
+    void   **curr = TOP;      /* Pointer to block's node of current iteration */
+    void   **prev = (void **)&TOP; /* Previous node of current ineration */
 
-    while (p != NULL) {
-        void *hp = (void *)((size_t *)p - 1);     /* Pointer to header */
-        size_t header = *(size_t *)hp;  /* Header element of each block */
+    while (curr != NULL) {
+        void   *hp   = HDR_PTR(curr); /* Pointer to header */
+        size_t  hele = HDR_ELE(hp); /* Header element of each block */
 
         /**
          * Resolve prev -> p -> *p -> (n) to prev -> *p -> (n) and move
          * current iteration to *p. (which is real adress to block node)
          */
-        while (header == -1U) {
-            node_delete(prev, p);
-            if ((p = *p) == NULL)
+        while (hele == -1U) {
+            node_delete(prev, curr);
+            if ((curr = *curr) == NULL)
                 return dest;
-            hp = (void *)(p - 1);
-            header = *(size_t *)hp;
+            hp   = HDR_PTR(curr);
+            hele = HDR_ELE(hp);
         }
-        size = MM_SIZE(header);
+        size = MM_SIZE(hele);
 
         /* If the block is appropriate, load hp to dest */
         if (size >= blocksize && size < min) {
-            prev_node = prev;
             dest = hp;
             min = size;
+            prev_node = prev;
             block_size = size;    /* Load this to indicate found block's size */
         }
 
         /* Traverse to the next list node */
-        prev = p;
-        p = *p;
+        prev = curr;
+        curr = *curr;
     }
     return dest;
 }
@@ -452,28 +463,21 @@ static void *get_target_block(size_t blocksize)
  *      HDR_ALLOC         allocated     allocated
  * HDR_PFREE|HDR_ALLOC      free        allocated
  */
-inline static int set_header(void *header, size_t blocksize, int flag)
+inline static void set_header(void *header, size_t blocksize, int flag)
 {
-    if (header == NULL)
-        return -1;
     *(size_t *)header = blocksize | flag;
-    return 0;
 }
 
 /*
  * set_footer - Duplicate header to last `size_t` part of block.
  */
-inline static int set_footer(void *header, size_t blocksize)
+inline static void set_footer(void *header, size_t blocksize)
 {
-    if (header == NULL)
-        return -1;
-
     size_t *fp;                           /* pointer to footer */
 
     /* Duplicate header to footer */
-    fp = (size_t *)(header + blocksize - sizeof(size_t));
+    fp = (size_t *)(header + blocksize - WORD);
     *fp = (*(size_t *)header) | FTR_VALID;
-    return 0;
 }
 
 /*
@@ -494,16 +498,18 @@ inline static void node_insert(void **prev, void **node)
     *prev = node;
 }
 
-inline static void **node_search_prev(void **curr)
+inline static void **node_find_prev(void **curr)
 {
     void **p = TOP, **prev = (void **)&TOP;
     while (p != curr) {
+#ifdef DEBUG
         if (p == NULL) {
             fprintf(stderr,
                "fatal error: attempt to search node %p but it is not on list\n"\
                "header: %x\n", curr, *(size_t *)(curr - 1));
             exit(1);
         }
+#endif
         prev = p;
         p = *p;
     }
@@ -521,7 +527,7 @@ inline static void node_delete(void **prev, void **curr)
 
 inline static void node_delete_s(void **curr)
 {
-    void **prev = node_search_prev(curr);
+    void **prev = node_find_prev(curr);
     node_delete(prev, curr);
 }
 
@@ -536,7 +542,7 @@ inline static void node_replace(void **prev, void **src, void **dst)
 
 inline static void node_replace_s(void **src, void **dst)
 {
-    void **prev = node_search_prev(src);
+    void **prev = node_find_prev(src);
     node_replace(prev, src, dst);
 }
 /*****************************
@@ -550,18 +556,18 @@ inline static void node_replace_s(void **src, void **dst)
 
 static void dbg_heap_check()
 {
-    void *p = mem_heap_lo() + SIZE_T_PADDING;
-    size_t size = MM_SIZE(*(size_t *)p);
+    void *p = FRST_BLK_HDR;
+    size_t size = MM_SIZE(HDR_ELE(p));
     void **node = TOP;
 
     while (size != 0) {
         if (!IS_ALLOC(*(size_t *)p)) {
             if (!dbg_is_on_list((void **)p + 1)) {
                 fprintf(stdout, "[%p]: (%p) %u; is not on list.\n",
-                        p, p + sizeof(size_t), MM_SIZE(*(size_t *)p));
+                        p, PLD_PTR(p), MM_SIZE(HDR_ELE(p));
                 dbg_print_list();
                 dbg_print_heap(0);
-                exit(-1);
+                exit(3);
             }
             node = (void **)dbg_next(node);
         }
@@ -600,16 +606,16 @@ static void *dbg_next(void **ptr)
 }
 
 static void dbg_print_heap(int verbose) {
-    void *p = mem_heap_lo() + SIZE_T_PADDING;
-    size_t size = MM_SIZE(*(size_t *)p);
+    void *p = FRST_BLK_HDR;
+    size_t size = MM_SIZE(HDR_ELE(p));
 
     printf("---HEAP---\n");
     while (size != 0) {
-        size_t header = *(size_t *)p;
-        if (verbose || !IS_ALLOC(header))
+        size_t hele = HDR_ELE(p);
+        if (verbose || !IS_ALLOC(hele))
             printf("[%p]: (%p) %4u; (%u,%u)\n",
-                   p, p + sizeof(size_t), size, IS_PFREE(header),
-                   IS_ALLOC(header));
+                   p, PLD_PTR(p), size, IS_PFREE(hele),
+                   IS_ALLOC(hele));
         p += size;
         size = MM_SIZE(*(size_t *)p);
     }
