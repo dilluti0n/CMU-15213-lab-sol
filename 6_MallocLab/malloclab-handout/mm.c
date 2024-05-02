@@ -113,9 +113,11 @@ static int    block_size;       /* Size of block founded by get_target_block */
 static void **prev_node;        /* Pointer to previous free block's node */
 static void **TOP;              /* Top node of explicit free list */
 
-static void         *malloc_existing_block(size_t blocksize);
-static void         *malloc_new_block(size_t blocksize);
-static void         *get_target_block(size_t blocksize);
+static void *malloc_existing_block(size_t blocksize);
+static void *malloc_new_block(size_t blocksize);
+static int   free_coalesce(void *ptr);
+static void *get_target_block(size_t blocksize);
+
 inline static void   set_header(void *header, size_t blocksize, int flag);
 inline static void   set_footer(void *header, size_t blocksize);
 inline static void **node_find_prev(void **curr);
@@ -197,7 +199,8 @@ static void  dbg_print_list();
     dbg_print_list();\
     dbg_heap_check();\
     dbg_list_check();\
-    printf("-----------------------------------\n");
+    printf("-----------------------------------\n");\
+
 #else
 #define DBG_CHECK
 #endif
@@ -241,64 +244,9 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
-    void         **curr        = (void **)ptr; /* Pointer to explicit list node */
-    void          *p           = HDR_PTR(ptr); /* Pointer to header */
-    const size_t   hdr         = HDR_ELE(p);   /* Header element */
-    size_t         blksize     = MM_SIZE(hdr); /* Blocksize */
-    int            isnotmerged = 1;
+    if (free_coalesce(ptr))
+        node_top((void **)ptr);
 
-    /* Merge with previous block */
-    if (IS_PFREE(hdr)) {
-        size_t ftr = FTR_ELE(p); /* Header element of previous block */
-        if (!IS_VALID(ftr))
-            /* Only 8-byte block's footer is overrided by list node. */
-            ftr = *((size_t *)p - 2);
-
-        /* Set flag and blocksize and header */
-        const size_t pbsize = MM_SIZE(ftr); /* Size of previous block */
-        blksize += pbsize;
-        p -= pbsize;            /* Merge two blocks */
-        isnotmerged = 0;
-    }
-
-    /* Merge with next block */
-    void   *nh    = p + blksize; /* Pointer to next block's header */
-    size_t  nhele = HDR_ELE(nh); /* Header element of next block */
-    if (!IS_ALLOC(nhele)) {
-        void **next = (void **)PLD_PTR(nh); /* Pointer to next block's node */
-        if (isnotmerged) { /* prev alloc, next free */
-            if (MM_SIZE(nhele) > 8) {
-                /* Defer process to get_target_block. See header comment. */
-                node_insert(next, curr);
-                HDR_ELE(nh) = -1U;
-            } else {
-                /**
-                 * TODO: improve this to not search entire list.
-                 *
-                 * If size of the next block is less then 8, footer of curr
-                 * overwrites node "next".
-                 */
-                node_replace_s(next, curr);
-            }
-        } else { /* prev free, next free */
-            node_delete_s(next);
-        }
-        blksize += MM_SIZE(nhele);
-
-        isnotmerged = 0;
-    }
-
-    /* Set current block's header and footer */
-    set_header(p, blksize, HDR_FREE);
-    set_footer(p, blksize);
-
-    /* Set non-merged next block's header */
-    void *const np = p + blksize;           /* Pointer to next block's header */
-    set_header(np, MM_SIZE(HDR_ELE(np)), HDR_PFREE | HDR_ALLOC);
-
-    if (isnotmerged) /* prev alloc, next alloc */
-        node_top(curr);
-    /* prev free, next alloc; Do nothing.*/
     DBG_CHECK
 }
 
@@ -359,15 +307,15 @@ static void *malloc_existing_block(size_t blocksize)
         set_header(p, blocksize, HDR_ALLOC);
 
         /* Mark empty space as free if there is empty space */
-        void *next = p + blocksize;
+        void *nh = p + blocksize;
         if (surplus != 0) {
-            set_header(next, (size_t)surplus, HDR_FREE);
-            set_footer(next, (size_t)surplus);
-            node_replace(prev_node, (void **)p + 1, (void **)next + 1);
+            set_header(nh, surplus, HDR_FREE);
+            set_footer(nh, surplus);
+            node_replace(prev_node, (void **)PLD_PTR(p), (void **)PLD_PTR(nh));
         } else {                /* There is no empty space */
             /* Mark next block as "Previous alloc" */
-            *(size_t *)next = *(size_t *)next & ~HDR_PFREE;
-            node_delete(prev_node, (void **)p + 1);
+            HDR_ELE(nh) = HDR_ELE(nh) & ~HDR_PFREE;
+            node_delete(prev_node, (void **)PLD_PTR(p));
         }
         return PLD_PTR(p);
     }
@@ -384,27 +332,92 @@ static void *malloc_new_block(size_t blocksize)
 {
     /* There is no appropriate free block on the heap. */
     void *p = LAST_BLK_HDR;
-    size_t excess = blocksize;             /* Requirement of heap */
+    size_t require = blocksize;             /* Requirement of heap */
 
     /* If previous block is free, new block should start at there. */
     if (IS_PFREE(HDR_ELE(p))) {
-                                                     /* Previous block's size */
-        const size_t pbsize = MM_SIZE(FTR_ELE(p));
-        excess -= pbsize;
-        p -= pbsize;                       /* New block should start at here. */
+        const size_t pbsize = MM_SIZE(FTR_ELE(p)); /* Previous block's size */
+        require -= pbsize;
+        p -= pbsize;
         node_delete_s((void **)PLD_PTR(p));
     }
 
     /* Request more heap !! */
-    if (mem_sbrk(excess) == (void *)-1) {
+    if (mem_sbrk(require) == (void *)-1) {
         return NULL;
     }
-    set_header(p, blocksize, HDR_ALLOC);    /* Set header as (blksize)/01 */
+    set_header(p, blocksize, HDR_ALLOC);    /* Set header as (blocksize)/01 */
     set_header(p + blocksize, 0, HDR_ALLOC); /* Set header of last block as 0/01 */
 
     return PLD_PTR(p);    /* return pointer to payload */
 }
 
+/*
+ * free_coalesce - When freeing the block, coalesce with the previous or next
+ *      adjacent block if it is free. This function sets the header and footer
+ *      of the block, and returns 1 if the coalesce is happend, 0 if not.
+ */
+int free_coalesce(void *ptr)
+{
+    void         **curr    = (void **)ptr; /* Pointer to node */
+    void          *p       = HDR_PTR(ptr); /* Pointer to header */
+    const size_t   hele    = HDR_ELE(p); /* Header element */
+    size_t         blksize = MM_SIZE(hele); /* Blocksize */
+
+    int isnotmerged = 1;
+
+    /* Merge with previous block */
+    if (IS_PFREE(hele)) {
+        size_t ftr = FTR_ELE(p); /* Header element of previous block */
+
+        /* Only 8-byte block's footer is overrided by list node. */
+        if (!IS_VALID(ftr))
+            ftr = *((size_t *)p - 2);
+
+        /* Merge two blocks */
+        blksize += MM_SIZE(ftr);
+        p -= MM_SIZE(ftr);
+
+        isnotmerged = 0;
+    }
+
+    /* Merge with next block */
+    void         *nh    = p + blksize; /* Pointer to next block's header */
+    const size_t  nhele = HDR_ELE(nh); /* Header element of next block */
+    if (!IS_ALLOC(nhele)) {
+        void **next = (void **)PLD_PTR(nh); /* Pointer to next block's node */
+        if (isnotmerged) { /* prev alloc, next free */
+            if (MM_SIZE(nhele) > 8) {
+                /* Defer process to get_target_block. See header comment. */
+                node_insert(next, curr);
+                HDR_ELE(nh) = -1U;
+            } else {
+                /**
+                 * TODO: improve this to not search entire list.
+                 *
+                 * If size of the next block is less then 8, footer of curr
+                 * overwrites node "next".
+                 */
+                node_replace_s(next, curr);
+            }
+        } else { /* prev free, next free */
+            node_delete_s(next);
+        }
+        blksize += MM_SIZE(nhele);
+
+        isnotmerged = 0;
+    }
+
+    /* Set current block's header and footer */
+    set_header(p, blksize, HDR_FREE);
+    set_footer(p, blksize);
+
+    /* Set non-merged next block's header */
+    void *const np = p + blksize;           /* Pointer to next block's header */
+    set_header(np, MM_SIZE(HDR_ELE(np)), HDR_PFREE | HDR_ALLOC);
+
+    return isnotmerged;
+}
 
 /*
  * get_target_block - return the pointer to head of appropriate free block while
