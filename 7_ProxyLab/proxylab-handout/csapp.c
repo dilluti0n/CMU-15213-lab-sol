@@ -20,6 +20,7 @@
  */
 /* $begin csapp.c */
 #include "csapp.h"
+#include "wrapper.h"
 
 /**************************
  * Error-handling functions
@@ -938,6 +939,7 @@ ssize_t Rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
 /* $begin open_clientfd */
 int open_clientfd(char *hostname, char *port) {
     int clientfd, rc;
+
     struct addrinfo hints, *listp, *p;
 
     /* Get a list of potential server addresses */
@@ -959,16 +961,15 @@ int open_clientfd(char *hostname, char *port) {
         /* Connect to the server */
         if (connect(clientfd, p->ai_addr, p->ai_addrlen) != -1)
             break; /* Success */
-        if (close(clientfd) < 0) { /* Connect failed, try another */  //line:netp:openclientfd:closefd
-            fprintf(stderr, "open_clientfd: close failed: %s\n", strerror(errno));
-            return -1;
-        }
+        wrap_close(clientfd); /* Connect failed, try another */  //line:netp:openclientfd:closefd
     }
 
     /* Clean up */
     freeaddrinfo(listp);
-    if (!p) /* All connects failed */
+    if (!p) { /* All connects failed */
+        fprintf(stderr, "open_clientfd: All connects failed\n");
         return -1;
+    }
     else    /* The last connect succeeded */
         return clientfd;
 }

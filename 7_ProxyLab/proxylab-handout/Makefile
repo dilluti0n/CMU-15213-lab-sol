@@ -10,14 +10,17 @@ LDFLAGS = -lpthread
 
 all: proxy
 
-csapp.o: csapp.c csapp.h
+csapp.o: csapp.c csapp.h wrapper.h
 	$(CC) $(CFLAGS) -c csapp.c
 
-proxy.o: proxy.c csapp.h
+proxy.o: proxy.c csapp.h wrapper.h
 	$(CC) $(CFLAGS) -c proxy.c
 
-proxy: proxy.o csapp.o
-	$(CC) $(CFLAGS) proxy.o csapp.o -o proxy $(LDFLAGS)
+wrapper.o: csapp.h wrapper.c wrapper.h
+	$(CC) $(CFLAGS) -c wrapper.c
+
+proxy: proxy.o csapp.o wrapper.o
+	$(CC) $(CFLAGS) proxy.o csapp.o wrapper.o -o proxy $(LDFLAGS)
 
 # Creates a tarball in ../proxylab-handin.tar that you can then
 # hand in. DO NOT MODIFY THIS!

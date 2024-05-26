@@ -1,13 +1,10 @@
 #include "csapp.h"
+#include "wrapper.h"
 
 #define DEFAULT_PORT "55556"
 #define MAXPORT 6               /* port <= 65535, five digits */
-#define VERBOSE_MSG(format, ...) \
-if (verbose) {\
-    printf("proxy: " format "\n", ##__VA_ARGS__);\
-}
 
-int verbose = 1;
+int verbose = 0;
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
@@ -27,22 +24,27 @@ int main(int argc, char *argv[])
     char                    *port, request[MAXLINE];
     int                      listenfd;
 
-    listenfd = Open_listenfd(port = (argc > 1? argv[1] : DEFAULT_PORT));
-    printf("proxy: proxy server listening on port %s\n", port);
+    listenfd = wrap_open_listenfd(port = (argc > 1? argv[1] : DEFAULT_PORT));
     for (;;) {
+        VERBOSE_MSG("Wait for connection...");
         int connfd;
 
         connfd = get_request_from_client(listenfd, request, (SA *)&clientaddr);
-        request_and_reply(connfd, request);
-
-        Close(connfd);
-
-        VERBOSE_MSG("clientfd%d closed, wait for next connection", connfd);
+        if (connfd > 0) {
+            request_and_reply(connfd, request);
+            wrap_close(connfd);
+        }
     }
-    Close(listenfd);
+    wrap_close(listenfd);
     return 0;
 }
 
+/*
+ * get_request_from_client - Accept connection from the listening port(sockfd)
+ *                and than read the first line of the client, load it to
+ *                request, return connfd. If there is an error, returns
+ *                -1 and do nothing.
+ */
 int get_request_from_client(int sockfd, char *request, SA *clientaddr)
 {
     socklen_t clientlen;
@@ -50,18 +52,21 @@ int get_request_from_client(int sockfd, char *request, SA *clientaddr)
     int       connfd;
 
     clientlen = sizeof(struct sockaddr_storage);
-    connfd = Accept(sockfd, clientaddr, &clientlen);
-    Rio_readinitb(&rp, connfd);
-    Rio_readlineb(&rp, request, MAXLINE);
-
-    VERBOSE_MSG("clientfd%d> %s", connfd, request);
+    connfd = wrap_accept(sockfd, clientaddr, &clientlen);
+    if (connfd < 0)
+        return -1;
+    rio_readinitb(&rp, connfd);
+    if (wrap_rio_readlineb(&rp, request, MAXLINE) < 0) {
+        wrap_close(connfd);
+        return -1;
+    }
 
     return connfd;
 }
 
 /*
  * request_and_reply - Establish connection to server and request.
- *         Get reply, and then echo it to client(connfd)
+ *         Get reply from the server, then echo it to client(connfd)
  */
 int request_and_reply(int connfd, char *request)
 {
@@ -71,30 +76,20 @@ int request_and_reply(int connfd, char *request)
     rio_t  rp;
 
     if (parse_request(request, hostname, newrequest, port) < 0) {
-        fprintf(stderr, "proxy: parse_request err\n");
-        exit(-1);
+        ERR_MSG("wrong request: %s", request);
+        return -1;
     }
 
-    VERBOSE_MSG("request_and_reply: \nhostname, %s\nport, %s\nnewrequest, %s",
-                hostname, port, newrequest);
-
-    clientfd = Open_clientfd(hostname, port);
-
-    VERBOSE_MSG("request_and_reply: %s:%s connected on fd%d",
-                hostname, port, clientfd);
-
+    clientfd = wrap_open_clientfd(hostname, port);
+    if (clientfd < 0) {
+        return -1;
+    }
     Rio_writen(clientfd, newrequest, strlen(newrequest));
-
-    VERBOSE_MSG("request_and_reply: %s;fd%d< %s",
-                hostname, clientfd, newrequest);
-
-    Rio_readinitb(&rp, clientfd);
-    while (Rio_readlineb(&rp, buf, MAX_OBJECT_SIZE) != 0) {
+    rio_readinitb(&rp, clientfd);
+    while (wrap_rio_readlineb(&rp, buf, MAX_OBJECT_SIZE) > 0) {
         Rio_writen(connfd, buf, strlen(buf));
     }
-    Close(clientfd);
-
-    VERBOSE_MSG("fd%d closed", clientfd);
+    wrap_close(clientfd);
 
     return 0;
 }
@@ -114,13 +109,13 @@ int parse_request(char *request, char *hostname, char *newrequest, char *port)
          p++, i++) {
         hostname[i] = c;
     }
-    if (c != '/' && c != ':') {
+    if (i >= MAXLINE) {
         fprintf(stderr, "proxy: out of range on hostname\n");
         return -1;
     }
     hostname[i] = '\0';
 
-    /* make newrequest */
+    /* get file name */
     char file[MAXLINE];
     if (c == '/') {
         for (i = 0; (c = *p) != '\0' && c != ':' && i < MAXLINE; p++, i++)
@@ -130,7 +125,7 @@ int parse_request(char *request, char *hostname, char *newrequest, char *port)
             return -1;
         }
         file[i] = '\0';
-    } else { /* c == ':' */
+    } else { /* c == ':' or '\0' */
         file[0] = '/';
         file[1] = '\0';
     }
