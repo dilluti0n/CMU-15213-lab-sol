@@ -14,46 +14,58 @@ static const char *user_agent_hdr = "\
 User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 \
 Firefox/10.0.3\r\n";
 
-int get_request_from_client(int listenfd, char *request, SA *clientaddr);
+int get_request_from_client(int connfd, char *request);
 int request_and_reply(int connfd, char *request);
 int parse_request(char *request, char *hostname, char *newrequest, char *port);
+void *thread(void *vargp);
 
 int main(int argc, char *argv[])
 {
     struct sockaddr_storage  clientaddr;
-    char                    *port, request[MAXLINE];
+    socklen_t                clientlen;
+    char                    *port;
     int                      listenfd;
+
+    signal(SIGPIPE, SIG_IGN);
 
     listenfd = wrap_open_listenfd(port = (argc > 1? argv[1] : DEFAULT_PORT));
     for (;;) {
         VERBOSE_MSG("wait for connection...");
         int connfd;
+        pthread_t tid;
 
-        connfd = get_request_from_client(listenfd, request, (SA *)&clientaddr);
+        clientlen = sizeof(struct sockaddr_storage);
+        connfd = wrap_accept(listenfd, (SA *) &clientaddr, &clientlen);
         if (connfd > 0)
-            request_and_reply(connfd, request);
-        wrap_close(connfd);
+            wrap_pthread_create(&tid, NULL, thread, (void *) connfd);
     }
     wrap_close(listenfd);
     return 0;
 }
 
-/*
- * get_request_from_client - Accept connection from the listening port(sockfd)
- *                and than read the first line of the client, load it to
- *                request, return connfd. If there is an error, returns
- *                -1 and do nothing.
- */
-int get_request_from_client(int sockfd, char *request, SA *clientaddr)
+void *thread(void *vargp)
 {
-    socklen_t clientlen;
-    rio_t     rp;
-    int       connfd;
+    int connfd = (long) vargp;
+    char request[MAXLINE];
 
-    clientlen = sizeof(struct sockaddr_storage);
-    connfd = wrap_accept(sockfd, clientaddr, &clientlen);
-    if (connfd < 0)
-        return -1;
+    wrap_pthread_detach(pthread_self());
+
+    if (get_request_from_client(connfd, request) > 0)
+        request_and_reply(connfd, request);
+    wrap_close(connfd);
+
+    return NULL;
+}
+
+/*
+ * get_request_from_client - Read the first line of the client(connfd), load it
+ *              to the request, return connfd. If there is an error, returns
+ *              -1 and do nothing.
+ */
+int get_request_from_client(int connfd, char *request)
+{
+    rio_t rp;
+
     rio_readinitb(&rp, connfd);
     if (wrap_rio_readlineb(&rp, request, MAXLINE) < 0)
         return -1;
@@ -84,7 +96,8 @@ int request_and_reply(int connfd, char *request)
     wrap_rio_writen(clientfd, newrequest, strlen(newrequest));
     rio_readinitb(&rp, clientfd);
     while (wrap_rio_readlineb(&rp, buf, MAX_OBJECT_SIZE) > 0) {
-        wrap_rio_writen(connfd, buf, strlen(buf));
+        if (wrap_rio_writen(connfd, buf, strlen(buf)) < 0)
+            break;
     }
     wrap_close(clientfd);
 

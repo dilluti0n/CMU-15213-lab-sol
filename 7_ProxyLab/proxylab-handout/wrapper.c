@@ -34,6 +34,7 @@ ssize_t wrap_rio_writen(int fd, void *usrbuf, size_t n)
         perror("proxy: write");
         return -1;
     }
+    VERBOSE_MSG("fd%d< %s", fd, (char *)usrbuf);
 
     return rc;
 }
@@ -69,6 +70,7 @@ int wrap_accept(int s, struct sockaddr *addr, socklen_t *addrlen)
         perror("err: accept");
         return -1;
     }
+    VERBOSE_MSG("accept request from listenfd %d", s);
     return rc;
 }
 
@@ -80,3 +82,22 @@ void wrap_close(int fd)
     }
     VERBOSE_MSG("fd%d closed.", fd);
 }
+
+int wrap_pthread_create(pthread_t *tidp, pthread_attr_t *attrp,
+                        void * (*routine)(void *), void *argp)
+{
+    int rc;
+
+    if ((rc = pthread_create(tidp, attrp, routine, argp)) != 0) {
+        ERR_MSG("err: pthread_create: %s", strerror(rc));
+    }
+    return rc;
+}
+
+void wrap_pthread_detach(pthread_t tid) {
+    int rc;
+
+    if ((rc = pthread_detach(tid)) != 0)
+        ERR_MSG("err: pthread_detatch: %s", strerror(rc));
+}
+

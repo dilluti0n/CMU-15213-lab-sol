@@ -21,5 +21,8 @@ ssize_t wrap_rio_writen(int fd, void *usrbuf, size_t n);
 ssize_t wrap_rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen);
 int wrap_accept(int s, struct sockaddr *addr, socklen_t *addrlen);
 void wrap_close(int fd);
+int wrap_pthread_create(pthread_t *tidp, pthread_attr_t *attrp,
+                        void * (*routine)(void *), void *argp);
+void wrap_pthread_detach(pthread_t tid);
 
 #endif /* endof wrapper.h */
