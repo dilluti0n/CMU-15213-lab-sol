@@ -2,7 +2,7 @@
 #include <asm-generic/errno.h>
 #include "wrapper.h"
 
-extern int verbose;
+extern int proxy_verbose;
 
 int wrap_open_listenfd(char *port)
 {
@@ -26,9 +26,22 @@ int wrap_open_clientfd(char *hostname, char *port)
     return fd;
 }
 
+ssize_t wrap_rio_writen(int fd, void *usrbuf, size_t n)
+{
+    int rc;
+
+    if ((rc = rio_writen(fd, usrbuf, n)) < 0) {
+        perror("proxy: write");
+        return -1;
+    }
+
+    return rc;
+}
+
 ssize_t wrap_rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
 {
     ssize_t rc;
+
     while ((rc = rio_readlineb(rp, usrbuf, maxlen)) < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             perror("proxy: read");

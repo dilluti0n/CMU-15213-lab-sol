@@ -4,7 +4,7 @@
 #define DEFAULT_PORT "55556"
 #define MAXPORT 6               /* port <= 65535, five digits */
 
-int verbose = 0;
+int proxy_verbose = 0;
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
@@ -26,14 +26,13 @@ int main(int argc, char *argv[])
 
     listenfd = wrap_open_listenfd(port = (argc > 1? argv[1] : DEFAULT_PORT));
     for (;;) {
-        VERBOSE_MSG("Wait for connection...");
+        VERBOSE_MSG("wait for connection...");
         int connfd;
 
         connfd = get_request_from_client(listenfd, request, (SA *)&clientaddr);
-        if (connfd > 0) {
+        if (connfd > 0)
             request_and_reply(connfd, request);
-            wrap_close(connfd);
-        }
+        wrap_close(connfd);
     }
     wrap_close(listenfd);
     return 0;
@@ -56,10 +55,8 @@ int get_request_from_client(int sockfd, char *request, SA *clientaddr)
     if (connfd < 0)
         return -1;
     rio_readinitb(&rp, connfd);
-    if (wrap_rio_readlineb(&rp, request, MAXLINE) < 0) {
-        wrap_close(connfd);
+    if (wrap_rio_readlineb(&rp, request, MAXLINE) < 0)
         return -1;
-    }
 
     return connfd;
 }
@@ -84,10 +81,10 @@ int request_and_reply(int connfd, char *request)
     if (clientfd < 0) {
         return -1;
     }
-    Rio_writen(clientfd, newrequest, strlen(newrequest));
+    wrap_rio_writen(clientfd, newrequest, strlen(newrequest));
     rio_readinitb(&rp, clientfd);
     while (wrap_rio_readlineb(&rp, buf, MAX_OBJECT_SIZE) > 0) {
-        Rio_writen(connfd, buf, strlen(buf));
+        wrap_rio_writen(connfd, buf, strlen(buf));
     }
     wrap_close(clientfd);
 

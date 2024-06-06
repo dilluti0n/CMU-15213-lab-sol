@@ -770,8 +770,8 @@ ssize_t rio_writen(int fd, void *usrbuf, size_t n)
 
     while (nleft > 0) {
 	if ((nwritten = write(fd, bufp, nleft)) <= 0) {
-	    if (errno == EINTR)  /* Interrupted by sig handler return */
-		nwritten = 0;    /* and call write() again */
+	    if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+		nwritten = 0;    /* call write() again */
 	    else
 		return -1;       /* errno set by write() */
 	}
@@ -781,7 +781,6 @@ ssize_t rio_writen(int fd, void *usrbuf, size_t n)
     return n;
 }
 /* $end rio_writen */
-
 
 /*
  * rio_read - This is a wrapper for the Unix read() function that
@@ -800,13 +799,13 @@ static ssize_t rio_read(rio_t *rp, char *usrbuf, size_t n)
 	rp->rio_cnt = read(rp->rio_fd, rp->rio_buf,
 			   sizeof(rp->rio_buf));
 	if (rp->rio_cnt < 0) {
-	    if (errno != EINTR) /* Interrupted by sig handler return */
+	    if (errno != EINTR)
 		return -1;
-	}
-	else if (rp->rio_cnt == 0)  /* EOF */
+	} else if (rp->rio_cnt == 0) {  /* EOF */
 	    return 0;
-	else
+        } else {
 	    rp->rio_bufptr = rp->rio_buf; /* Reset buffer ptr */
+        }
     }
 
     /* Copy min(n, rp->rio_cnt) bytes from internal buf to user buf */
